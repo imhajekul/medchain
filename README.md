@@ -13,11 +13,11 @@ This is the single project that will be carried through Kenshi, Samurai, and Sho
 
 | Doc | Covers |
 |---|---|
-| [`01-PRD.md`](./01-PRD.md) | Problem statement, target user, MVP scope, why web3 is used here (not just "storage") |
-| [`02-ARCHITECTURE.md`](./02-ARCHITECTURE.md) | System diagram, components, stack choices, data model, architectural risks |
-| [`03-API-SPEC.md`](./03-API-SPEC.md) | Full API endpoint contract |
-| [`03-UI-FLOW.md`](./03-UI-FLOW.md) | Screen inventory and flow — the script for the Excalidraw/Miro sketch |
-| [`04-ROADMAP.md`](./04-ROADMAP.md) | Functional/non-functional requirements, level-by-level milestones (Ronin → Shogun), dependencies, top risks |
+| [`01-PRD.md`] | Problem statement, target user, MVP scope, why web3 is used here (not just "storage") |
+| [`02-ARCHITECTURE.md`] | System diagram, components, stack choices, data model, architectural risks |
+| [`03-API-SPEC.md`] | Full API endpoint contract |
+| [`03-UI-FLOW.md`] | Screen inventory and flow — the script for the Excalidraw/Miro sketch |
+| [`04-ROADMAP.md`] | Functional/non-functional requirements, level-by-level milestones (Ronin → Shogun), dependencies, top risks |
 
 ## Sketch
 
