@@ -1,6 +1,5 @@
 # MedVault — Patient-Owned Medical Records
 
-![MedVault Hero](https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80)
 
 MedVault is a decentralized, dark-first, medical-grade application that reinvents medical data privacy. We ensure that raw health data never touches the blockchain. Only access permissions and audit events do — giving you a tamper-proof trail you can trust.
 
@@ -30,6 +29,19 @@ MedVault is a decentralized, dark-first, medical-grade application that reinvent
 ### Deployment, Code & README (15 pts)
 - **Live Demo:** [Insert Vercel/Netlify Live URL Here]
 - **Clean Repo:** Strict folder structure separating `pages`, `components`, `hooks`, and `context`.
+
+---
+
+## 📸 Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/desktop-dark.png" width="48%" alt="Desktop Dark Mode" />
+  <img src="docs/screenshots/mobile-view.png" width="48%" alt="Mobile View" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/empty.png" width="48%" alt="Empty State" />
+  <img src="docs/screenshots/error.png" width="48%" alt="Custom 404 Error" />
+</p>
 
 ---
 
