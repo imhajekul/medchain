@@ -27,7 +27,7 @@ MedVault is a decentralized, dark-first, medical-grade application that reinvent
 - **Planning Docs:** [Link to Initial PRD/Notion (Placeholder)](#)
 
 ### Deployment, Code & README (15 pts)
-- **Live Demo:** [Insert Vercel/Netlify Live URL Here]
+- **Live Demo:** [https://medchain-rust.vercel.app/](https://medchain-rust.vercel.app/)
 - **Clean Repo:** Strict folder structure separating `pages`, `components`, `hooks`, and `context`.
 
 ---
