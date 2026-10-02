@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard';
 import UploadRecord from './pages/UploadRecord';
 import RecordDetail from './pages/RecordDetail';
 import DoctorAccess from './pages/DoctorAccess';
+import NotFound from './pages/NotFound';
 
 // Page transition wrapper
 const pageVariants = {
@@ -80,7 +81,9 @@ function AnimatedRoutes() {
         <Route path="/doctor-access" element={
           <PageTransition><DoctorAccess /></PageTransition>
         } />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={
+          <PageTransition><NotFound /></PageTransition>
+        } />
       </Routes>
     </AnimatePresence>
   );
