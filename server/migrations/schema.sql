@@ -77,3 +77,19 @@ CREATE TABLE IF NOT EXISTS indexer_state (
     last_indexed_block BIGINT NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 6. Users Table: Multi-user authentication & credentials (Samurai Level Full-Stack)
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    salt VARCHAR(64) NOT NULL,
+    role VARCHAR(20) NOT NULL DEFAULT 'PATIENT', -- PATIENT or DOCTOR
+    wallet_address VARCHAR(42) NOT NULL,         -- Cryptographic self-sovereign wallet
+    name VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_wallet ON users(wallet_address);
+

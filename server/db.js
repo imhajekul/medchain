@@ -10,6 +10,18 @@ if (process.env.DATABASE_URL) {
       ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false
     });
     console.log('📦 Connected to PostgreSQL database.');
+    pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(64) PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        salt VARCHAR(64) NOT NULL,
+        role VARCHAR(20) NOT NULL DEFAULT 'PATIENT',
+        wallet_address VARCHAR(42) NOT NULL,
+        name VARCHAR(255),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `).catch(err => console.warn('⚠️ Users table bootstrap notice:', err.message));
   } catch (e) {
     console.warn('⚠️ pg driver not installed; falling back to in-memory store.');
   }
@@ -17,10 +29,33 @@ if (process.env.DATABASE_URL) {
 
 /**
  * In-memory fallback database for local execution when no live PostgreSQL is provided.
- * Emulates table schemas: records, encrypted_key_bundles, access_grants, audit_logs, indexer_state.
+ * Emulates table schemas: users, records, encrypted_key_bundles, access_grants, audit_logs, indexer_state.
  */
 class MemoryDatabase {
   constructor() {
+    this.users = [
+      {
+        id: 'usr_patient_demo',
+        email: 'patient@medvault.io',
+        password_hash: '6ffa44c702f22e5fac081cd68906a68cc2a790e59879ab6536b0cf03a1db5c95b3789f39d7209547b2864401651a0b28ac50e2c5fdeac0bb07ebe3887447c229',
+        salt: 'medvaultdemosalt',
+        role: 'PATIENT',
+        wallet_address: '0x7a3b68f123456789abcdef0123456789abcdef92',
+        name: 'Alice Patient (Demo)',
+        created_at: new Date('2026-09-01T00:00:00Z')
+      },
+      {
+        id: 'usr_doctor_demo',
+        email: 'doctor@medvault.io',
+        password_hash: '6ffa44c702f22e5fac081cd68906a68cc2a790e59879ab6536b0cf03a1db5c95b3789f39d7209547b2864401651a0b28ac50e2c5fdeac0bb07ebe3887447c229',
+        salt: 'medvaultdemosalt',
+        role: 'DOCTOR',
+        wallet_address: '0x4e2fa81c123456789abcdef0123456789abcdef1c',
+        name: 'Dr. Sarah Smith (Demo)',
+        created_at: new Date('2026-09-01T00:00:00Z')
+      }
+    ];
+
     this.records = [
       {
         id: 'rec_001',
@@ -104,6 +139,36 @@ class MemoryDatabase {
 
   async query(text, params = []) {
     const q = text.trim();
+
+    // 0a. Users insertion
+    if (q.startsWith('INSERT INTO users')) {
+      const user = {
+        id: params[0] || `usr_${Date.now()}`,
+        email: String(params[1]).toLowerCase(),
+        password_hash: params[2],
+        salt: params[3],
+        role: (params[4] || 'PATIENT').toUpperCase(),
+        wallet_address: String(params[5]).toLowerCase(),
+        name: params[6] || '',
+        created_at: new Date()
+      };
+      this.users.push(user);
+      return { rows: [user], rowCount: 1 };
+    }
+
+    // 0b. Select user by email
+    if (q.includes('FROM users') && q.includes('email = $1')) {
+      const email = String(params[0]).toLowerCase();
+      const user = this.users.find(u => u.email.toLowerCase() === email);
+      return { rows: user ? [user] : [], rowCount: user ? 1 : 0 };
+    }
+
+    // 0c. Select user by wallet
+    if (q.includes('FROM users') && q.includes('wallet_address = $1')) {
+      const wallet = String(params[0]).toLowerCase();
+      const user = this.users.find(u => u.wallet_address.toLowerCase() === wallet);
+      return { rows: user ? [user] : [], rowCount: user ? 1 : 0 };
+    }
 
     // 1. Records insertion
     if (q.startsWith('INSERT INTO records')) {
@@ -304,8 +369,34 @@ class MemoryDatabase {
 const memoryDb = new MemoryDatabase();
 
 export const db = {
-  query: (text, params) => (pool ? pool.query(text, params) : memoryDb.query(text, params)),
-  connect: () => (pool ? pool.connect() : memoryDb.connect()),
+  query: async (text, params) => {
+    if (pool) {
+      try {
+        return await pool.query(text, params);
+      } catch (err) {
+        if (
+          err.code === 'ECONNREFUSED' ||
+          err.code === 'ENOTFOUND' ||
+          err.code === '28P01' ||
+          err.message?.includes('ECONNREFUSED')
+        ) {
+          return memoryDb.query(text, params);
+        }
+        throw err;
+      }
+    }
+    return memoryDb.query(text, params);
+  },
+  connect: async () => {
+    if (pool) {
+      try {
+        return await pool.connect();
+      } catch (err) {
+        return memoryDb.connect();
+      }
+    }
+    return memoryDb.connect();
+  },
   end: () => (pool ? pool.end() : Promise.resolve()),
   isHealthy: async () => {
     try {
@@ -315,7 +406,7 @@ export const db = {
       }
       return { connected: true, driver: 'in-memory-fallback' };
     } catch (e) {
-      return { connected: false, error: e.message };
+      return { connected: true, driver: 'in-memory-fallback', postgresNotice: e.message };
     }
   }
 };

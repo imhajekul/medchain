@@ -93,10 +93,7 @@ export async function authenticateWalletSignature(walletAddress, signature, nonc
     role: userRole
   };
 
-  const sessionToken = jwt.sign(tokenPayload, JWT_SECRET, {
-    expiresIn: '8h',
-    algorithm: 'HS256'
-  });
+  const sessionToken = issueSessionToken(tokenPayload);
 
   return {
     sessionToken,
@@ -106,8 +103,18 @@ export async function authenticateWalletSignature(walletAddress, signature, nonc
 }
 
 /**
+ * Issues a signed JWT session token with 8-hour expiry.
+ */
+export function issueSessionToken(payload) {
+  return jwt.sign(payload, JWT_SECRET, {
+    expiresIn: '8h',
+    algorithm: 'HS256'
+  });
+}
+
+/**
  * Middleware: Enforces valid Bearer JWT on protected endpoints.
- * Injects verified wallet identity into req.user = { walletAddress, role }.
+ * Injects verified wallet identity into req.user = { walletAddress, role, email, name, id }.
  */
 export function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -119,8 +126,11 @@ export function requireAuth(req, res, next) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = {
-      walletAddress: decoded.walletAddress.toLowerCase(),
-      role: decoded.role || 'PATIENT'
+      walletAddress: (decoded.walletAddress || '').toLowerCase(),
+      role: decoded.role || 'PATIENT',
+      email: decoded.email || null,
+      name: decoded.name || null,
+      id: decoded.id || null
     };
     next();
   } catch (err) {

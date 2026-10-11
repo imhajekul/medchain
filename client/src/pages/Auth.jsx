@@ -3,16 +3,18 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Shield, Wallet, ArrowRight, User, Mail, Lock,
-  Stethoscope, Heart, Eye, EyeOff, CheckCircle, ChevronLeft
+  Stethoscope, Heart, Eye, EyeOff, CheckCircle, ChevronLeft, Sparkles
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import './Auth.css';
 
 export default function Auth() {
   const navigate = useNavigate();
-  const { signIn, loading } = useApp();
-  const [mode, setMode] = useState('select'); // select | signin
+  const { signIn, loginWithEmail, registerWithEmail, loading } = useApp();
+  const [mode, setMode] = useState('select'); // select | form
   const [role, setRole] = useState('patient');
+  const [authMethod, setAuthMethod] = useState('email'); // email | wallet
+  const [isRegister, setIsRegister] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   // Form fields
@@ -31,9 +33,23 @@ export default function Auth() {
 
   const validate = () => {
     const errs = {};
-    if (!form.walletAddress.trim()) errs.walletAddress = 'Wallet address is required';
-    else if (!form.walletAddress.startsWith('0x') && form.walletAddress.length < 6) {
-      errs.walletAddress = 'Enter a valid wallet address or use demo';
+    if (authMethod === 'email') {
+      if (!form.email.trim()) {
+        errs.email = 'Email address is required';
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+        errs.email = 'Enter a valid email address';
+      }
+      if (!form.password) {
+        errs.password = 'Password is required';
+      } else if (form.password.length < 6) {
+        errs.password = 'Password must be at least 6 characters';
+      }
+    } else {
+      if (!form.walletAddress.trim()) {
+        errs.walletAddress = 'Wallet address is required';
+      } else if (!form.walletAddress.startsWith('0x') && form.walletAddress.length < 6) {
+        errs.walletAddress = 'Enter a valid 0x wallet address or use demo';
+      }
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -43,16 +59,47 @@ export default function Auth() {
     e.preventDefault();
     if (!validate()) return;
 
-    await signIn({
-      walletAddress: form.walletAddress.trim(),
-      role
-    });
-    navigate(role === 'patient' ? '/dashboard' : '/doctor-access');
+    try {
+      if (authMethod === 'email') {
+        if (isRegister) {
+          await registerWithEmail(form.email.trim(), form.password, role, form.displayName.trim());
+        } else {
+          await loginWithEmail(form.email.trim(), form.password);
+        }
+      } else {
+        await signIn({
+          walletAddress: form.walletAddress.trim(),
+          role
+        });
+      }
+      navigate(role === 'patient' ? '/dashboard' : '/doctor-access');
+    } catch (err) {
+      setErrors(prev => ({ ...prev, general: err.message || 'Authentication failed' }));
+    }
   };
 
   const handleQuickDemo = async (demoRole) => {
-    await signIn({ role: demoRole });
-    navigate(demoRole === 'patient' ? '/dashboard' : '/doctor-access');
+    const demoEmail = demoRole === 'patient' ? 'patient@medvault.io' : 'doctor@medvault.io';
+    try {
+      await loginWithEmail(demoEmail, 'Password123!');
+      navigate(demoRole === 'patient' ? '/dashboard' : '/doctor-access');
+    } catch {
+      // Fallback to signature demo
+      await signIn({ role: demoRole });
+      navigate(demoRole === 'patient' ? '/dashboard' : '/doctor-access');
+    }
+  };
+
+  const prefillDemoAccount = (demoRole) => {
+    setRole(demoRole);
+    setAuthMethod('email');
+    setIsRegister(false);
+    setForm(prev => ({
+      ...prev,
+      email: demoRole === 'patient' ? 'patient@medvault.io' : 'doctor@medvault.io',
+      password: 'Password123!'
+    }));
+    setMode('form');
   };
 
   return (
@@ -97,7 +144,7 @@ export default function Auth() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.35 }}
                 >
-                  Patient-owned, blockchain-verified medical records. Choose how you want to continue.
+                  Patient-owned, end-to-end encrypted medical data. Authenticate via email credentials or self-sovereign Web3 wallet.
                 </motion.p>
 
                 {/* Role Cards */}
@@ -109,7 +156,7 @@ export default function Auth() {
                 >
                   <motion.button
                     className="role-card"
-                    onClick={() => { setRole('patient'); setMode('signin'); }}
+                    onClick={() => { setRole('patient'); setMode('form'); }}
                     whileHover={{ y: -4, borderColor: 'rgba(2, 132, 199, 0.4)' }}
                     whileTap={{ scale: 0.98 }}
                   >
@@ -117,13 +164,13 @@ export default function Auth() {
                       <Heart size={24} />
                     </div>
                     <h3 className="role-card-title">I'm a Patient</h3>
-                    <p className="role-card-desc">Upload records, manage grants, and track access to your medical data.</p>
+                    <p className="role-card-desc">Upload AES-256 records, create time-boxed access grants, and audit accesses.</p>
                     <div className="role-card-arrow"><ArrowRight size={16} /></div>
                   </motion.button>
 
                   <motion.button
                     className="role-card"
-                    onClick={() => { setRole('doctor'); setMode('signin'); }}
+                    onClick={() => { setRole('doctor'); setMode('form'); }}
                     whileHover={{ y: -4, borderColor: 'rgba(59, 130, 246, 0.4)' }}
                     whileTap={{ scale: 0.98 }}
                   >
@@ -131,12 +178,12 @@ export default function Auth() {
                       <Stethoscope size={24} />
                     </div>
                     <h3 className="role-card-title">I'm a Doctor</h3>
-                    <p className="role-card-desc">Access shared records from patients with time-boxed, verified grants.</p>
+                    <p className="role-card-desc">Review records granted by patients and verify immutable on-chain audit trails.</p>
                     <div className="role-card-arrow"><ArrowRight size={16} /></div>
                   </motion.button>
                 </motion.div>
 
-                {/* Quick demo access */}
+                {/* Quick Evaluator Access */}
                 <motion.div
                   className="auth-demo-section"
                   initial={{ opacity: 0 }}
@@ -144,7 +191,7 @@ export default function Auth() {
                   transition={{ delay: 0.6 }}
                 >
                   <div className="auth-divider">
-                    <span>Quick Demo</span>
+                    <span>⚡ Quick 1-Click Judge Evaluation</span>
                   </div>
                   <div className="auth-demo-buttons">
                     <motion.button
@@ -155,7 +202,7 @@ export default function Auth() {
                       whileTap={{ scale: 0.98 }}
                     >
                       <Heart size={14} />
-                      {loading ? 'Connecting...' : 'Demo as Patient'}
+                      {loading ? 'Authenticating...' : 'Sign In as Demo Patient'}
                     </motion.button>
                     <motion.button
                       className="btn btn-secondary btn-sm"
@@ -165,7 +212,7 @@ export default function Auth() {
                       whileTap={{ scale: 0.98 }}
                     >
                       <Stethoscope size={14} />
-                      {loading ? 'Connecting...' : 'Demo as Doctor'}
+                      {loading ? 'Authenticating...' : 'Sign In as Demo Doctor'}
                     </motion.button>
                   </div>
                 </motion.div>
@@ -173,8 +220,8 @@ export default function Auth() {
             </motion.div>
           )}
 
-          {/* Sign In Form */}
-          {mode === 'signin' && (
+          {/* Sign In / Register Form */}
+          {mode === 'form' && (
             <motion.div
               key="form"
               className="auth-panel auth-form-panel"
@@ -189,76 +236,190 @@ export default function Auth() {
                 onClick={() => { setMode('select'); setErrors({}); }}
                 whileHover={{ x: -3 }}
               >
-                <ChevronLeft size={18} /> Back
+                <ChevronLeft size={18} /> Back to roles
               </motion.button>
 
               {/* Form Header */}
               <div className="auth-form-header">
                 <div className={`auth-role-badge ${role === 'patient' ? 'auth-role-patient' : 'auth-role-doctor'}`}>
                   {role === 'patient' ? <Heart size={14} /> : <Stethoscope size={14} />}
-                  <span>{role === 'patient' ? 'Patient' : 'Doctor'}</span>
+                  <span>{role === 'patient' ? 'Patient Portal' : 'Healthcare Provider'}</span>
                 </div>
                 <h2 className="auth-form-title">
-                  Sign In
+                  {isRegister ? 'Create MedVault Account' : 'Sign In to MedVault'}
                 </h2>
                 <p className="auth-form-subtitle">
-                  Connect your wallet to access your MedVault account.
+                  {authMethod === 'email'
+                    ? (isRegister ? 'Create your profile backed by PostgreSQL persistence.' : 'Enter your credentials to restore your session.')
+                    : 'Cryptographically authenticate via EIP-4361 Sign-In with Ethereum.'}
                 </p>
               </div>
 
+              {/* Auth Method Toggle (Email vs Web3) */}
+              <div className="auth-tabs" style={{ display: 'flex', gap: '8px', marginBottom: '20px', background: 'var(--color-bg-card)', padding: '4px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-border)' }}>
+                <button
+                  type="button"
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    background: authMethod === 'email' ? 'var(--color-primary)' : 'transparent',
+                    color: authMethod === 'email' ? '#fff' : 'var(--color-text-secondary)'
+                  }}
+                  onClick={() => { setAuthMethod('email'); setErrors({}); }}
+                >
+                  <Mail size={14} /> Email & Password
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    background: authMethod === 'wallet' ? 'var(--color-primary)' : 'transparent',
+                    color: authMethod === 'wallet' ? '#fff' : 'var(--color-text-secondary)'
+                  }}
+                  onClick={() => { setAuthMethod('wallet'); setErrors({}); }}
+                >
+                  <Wallet size={14} /> Web3 Wallet
+                </button>
+              </div>
+
+              {/* General Error Alert */}
+              {errors.general && (
+                <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', fontSize: '13px', marginBottom: '16px' }}>
+                  {errors.general}
+                </div>
+              )}
+
               {/* Auth Form */}
               <form className="auth-form" onSubmit={handleSubmit}>
-                {/* Wallet Address */}
-                <div className="input-group">
-                  <label className="input-label" htmlFor="wallet">
-                    <Wallet size={14} /> Wallet Address
-                  </label>
-                  <div className="input-with-action">
-                    <input
-                      id="wallet"
-                      className={`input-field ${errors.walletAddress ? 'input-error' : ''}`}
-                      type="text"
-                      placeholder="0x7a3b4c5d6e..."
-                      value={form.walletAddress}
-                      onChange={e => updateField('walletAddress', e.target.value)}
-                    />
-                    <motion.button
-                      type="button"
-                      className="btn btn-ghost btn-sm input-action-btn"
-                      onClick={() => updateField('walletAddress', `0x${Math.random().toString(16).substr(2, 8)}...${Math.random().toString(16).substr(2, 4)}`)}
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                    >
-                      Generate
-                    </motion.button>
-                  </div>
-                  {errors.walletAddress && <span className="field-error">{errors.walletAddress}</span>}
-                </div>
+                {authMethod === 'email' ? (
+                  <>
+                    {/* Display Name (Register only) */}
+                    {isRegister && (
+                      <div className="input-group">
+                        <label className="input-label" htmlFor="name">
+                          <User size={14} /> Full Name
+                        </label>
+                        <input
+                          id="name"
+                          className="input-field"
+                          type="text"
+                          placeholder={role === 'patient' ? 'Alice Patient' : 'Dr. Sarah Smith'}
+                          value={form.displayName}
+                          onChange={e => updateField('displayName', e.target.value)}
+                        />
+                      </div>
+                    )}
 
-                {/* Password (visual only — no real auth) */}
-                <div className="input-group">
-                  <label className="input-label" htmlFor="password">
-                    <Lock size={14} /> Password
-                    <span className="input-label-hint">(simulated)</span>
-                  </label>
-                  <div className="input-with-action">
-                    <input
-                      id="password"
-                      className="input-field"
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="••••••••"
-                      value={form.password}
-                      onChange={e => updateField('password', e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm input-action-btn"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                </div>
+                    {/* Email Address */}
+                    <div className="input-group">
+                      <label className="input-label" htmlFor="email">
+                        <Mail size={14} /> Email Address
+                      </label>
+                      <input
+                        id="email"
+                        className={`input-field ${errors.email ? 'input-error' : ''}`}
+                        type="email"
+                        placeholder={role === 'patient' ? 'patient@medvault.io' : 'doctor@medvault.io'}
+                        value={form.email}
+                        onChange={e => updateField('email', e.target.value)}
+                      />
+                      {errors.email && <span className="field-error">{errors.email}</span>}
+                    </div>
+
+                    {/* Password */}
+                    <div className="input-group">
+                      <label className="input-label" htmlFor="password">
+                        <Lock size={14} /> Password
+                      </label>
+                      <div className="input-with-action">
+                        <input
+                          id="password"
+                          className={`input-field ${errors.password ? 'input-error' : ''}`}
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="••••••••"
+                          value={form.password}
+                          onChange={e => updateField('password', e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm input-action-btn"
+                          onClick={() => setShowPassword(!showPassword)}
+                        >
+                          {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                      {errors.password && <span className="field-error">{errors.password}</span>}
+                    </div>
+
+                    {/* Fast Fill Demo Credentials */}
+                    {!isRegister && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '4px 0 12px' }}>
+                        <button
+                          type="button"
+                          style={{ background: 'none', border: 'none', color: 'var(--color-primary-light)', fontSize: '12px', cursor: 'pointer', padding: 0 }}
+                          onClick={() => prefillDemoAccount(role)}
+                        >
+                          Fill demo {role} credentials
+                        </button>
+                        <button
+                          type="button"
+                          style={{ background: 'none', border: 'none', color: 'var(--color-text-tertiary)', fontSize: '12px', cursor: 'pointer', padding: 0 }}
+                          onClick={() => setIsRegister(!isRegister)}
+                        >
+                          {isRegister ? 'Already have an account? Sign In' : 'Need an account? Register'}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Wallet Address */}
+                    <div className="input-group">
+                      <label className="input-label" htmlFor="wallet">
+                        <Wallet size={14} /> Wallet Address (EIP-4361)
+                      </label>
+                      <div className="input-with-action">
+                        <input
+                          id="wallet"
+                          className={`input-field ${errors.walletAddress ? 'input-error' : ''}`}
+                          type="text"
+                          placeholder="0x7a3b4c5d6e..."
+                          value={form.walletAddress}
+                          onChange={e => updateField('walletAddress', e.target.value)}
+                        />
+                        <motion.button
+                          type="button"
+                          className="btn btn-ghost btn-sm input-action-btn"
+                          onClick={() => updateField('walletAddress', `0x${Math.random().toString(16).substr(2, 40)}`)}
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                        >
+                          Random 0x
+                        </motion.button>
+                      </div>
+                      {errors.walletAddress && <span className="field-error">{errors.walletAddress}</span>}
+                    </div>
+                  </>
+                )}
 
                 {/* Submit */}
                 <motion.button
@@ -275,11 +436,13 @@ export default function Auth() {
                         animate={{ rotate: 360 }}
                         transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
                       />
-                      Signing In...
+                      Authenticating...
                     </span>
                   ) : (
                     <>
-                      Sign In with Wallet
+                      {authMethod === 'email'
+                        ? (isRegister ? 'Create Account & Continue' : 'Sign In with Password')
+                        : 'Sign SIWE Challenge'}
                       <ArrowRight size={18} />
                     </>
                   )}
@@ -288,8 +451,12 @@ export default function Auth() {
 
               {/* Security note */}
               <div className="auth-security-note">
-                <Shield size={14} />
-                <span>MedVault uses wallet-based authentication (SIWE). No passwords are stored. Your medical data is encrypted client-side.</span>
+                <CheckCircle size={14} />
+                <span>
+                  {authMethod === 'email'
+                    ? 'Protected with PBKDF2 100,000-round password hashing & stateless JWT sessions.'
+                    : 'Cryptographically signed via MetaMask or ephemeral sovereign keypairs.'}
+                </span>
               </div>
             </motion.div>
           )}

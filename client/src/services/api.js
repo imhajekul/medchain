@@ -31,6 +31,33 @@ function getAuthHeaders() {
 }
 
 export const api = {
+  // --- Samurai Level: Real Email & Password Authentication ---
+  async register(email, password, role = 'patient', name = '') {
+    const res = await fetch(`${API_BASE}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, role, name })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Registration failed');
+    }
+    return data;
+  },
+
+  async login(email, password) {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Invalid email or password');
+    }
+    return data;
+  },
+
   // --- Step 2: Web3 Authentication ---
   async getNonce() {
     const res = await fetch(`${API_BASE}/auth/nonce`);

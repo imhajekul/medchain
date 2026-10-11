@@ -81,6 +81,70 @@ async function runApiSpecTests() {
   console.log(`   ✅ Doctor Authenticated: role=${docAuth.role}\n`);
 
   // ===========================================================================
+  // Step 3B: Samurai Full-Stack Email & Password Authentication (/auth/register & /auth/login)
+  // ===========================================================================
+  console.log('➡️ [Step 3B] Testing Samurai Email/Password Authentication & Sessions...');
+  const testEmail = `judge_${Date.now()}@medvault.test`;
+  const testPassword = 'SecurePassword123!';
+
+  // 1. Register new user
+  const regRes = await fetch(`${BASE_URL}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: testEmail,
+      password: testPassword,
+      role: 'PATIENT',
+      name: 'Judge Evaluator'
+    })
+  });
+  const regData = await regRes.json();
+  if (regRes.status !== 201 || !regData.sessionToken) {
+    throw new Error(`Registration failed: ${JSON.stringify(regData)}`);
+  }
+  console.log(`   ✅ User Registered: email=${regData.user.email}, role=${regData.user.role}, wallet=${regData.user.walletAddress}`);
+
+  // 2. Reject duplicate registration
+  const dupRes = await fetch(`${BASE_URL}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: testEmail, password: testPassword })
+  });
+  if (dupRes.status !== 409) throw new Error('Expected 409 Conflict on duplicate registration');
+  console.log('   ✅ Conflict Handled: Duplicate email registration blocked with HTTP 409.');
+
+  // 3. Login with correct credentials
+  const loginRes = await fetch(`${BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: testEmail, password: testPassword })
+  });
+  const loginData = await loginRes.json();
+  if (loginRes.status !== 200 || !loginData.sessionToken) {
+    throw new Error(`Login failed: ${JSON.stringify(loginData)}`);
+  }
+  console.log('   ✅ User Logged In: Valid JWT session token issued.');
+
+  // 4. Reject invalid password
+  const badLoginRes = await fetch(`${BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: testEmail, password: 'WrongPassword999!' })
+  });
+  if (badLoginRes.status !== 401) throw new Error('Expected 401 Unauthorized on wrong password');
+  console.log('   ✅ Security Enforced: Incorrect password rejected with HTTP 401.');
+
+  // 5. Test Demo Seed Account Login (patient@medvault.io)
+  const demoLoginRes = await fetch(`${BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'patient@medvault.io', password: 'Password123!' })
+  });
+  const demoLoginData = await demoLoginRes.json();
+  if (demoLoginRes.status !== 200) throw new Error('Demo account login failed');
+  console.log(`   ✅ Demo Account Verified: patient@medvault.io logged in as ${demoLoginData.user.role}.\n`);
+
+  // ===========================================================================
   // Step 4: Storage & Record Management APIs (POST /records, GET /records/:id)
   // ===========================================================================
   console.log('➡️ [Step 4] Testing Encrypted Storage APIs & Plaintext Rejection...');

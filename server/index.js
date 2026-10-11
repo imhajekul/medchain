@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 
 import { db } from './db.js';
 import { requireAuth } from './middleware/auth.js';
-import { getNonce, connectWallet, getMe } from './controllers/auth.controller.js';
+import { getNonce, connectWallet, getMe, registerUser, loginUser } from './controllers/auth.controller.js';
 import {
   uploadRecord,
   listRecords,
@@ -129,8 +129,10 @@ const readinessHandler = async (req, res) => {
 };
 app.get(['/ready', '/api/ready'], readinessHandler);
 
-// ─── Step 3: SIWE Authentication & Session Layer ──────────────
-// Conforms to 03-API-SPEC.md: POST /auth/connect -> { sessionToken, role }
+// ─── Samurai Level: Full-Stack Auth & Multi-User Session Layer ─
+// Dual Authentication: Email/Password (Web2) & SIWE Signature (Web3)
+app.post(['/auth/register', '/api/auth/register'], authLimiter, registerUser);
+app.post(['/auth/login', '/api/auth/login'], authLimiter, loginUser);
 app.get(['/auth/nonce', '/api/auth/nonce'], authLimiter, getNonce);
 app.post(['/auth/connect', '/api/auth/connect'], authLimiter, connectWallet);
 app.get(['/auth/me', '/api/auth/me'], requireAuth, getMe);

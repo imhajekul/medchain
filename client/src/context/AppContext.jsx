@@ -166,6 +166,65 @@ export function AppProvider({ children }) {
     }
   }, [addToast, refreshRecords]);
 
+  // =========================================================================
+  // Samurai Level: Real Email & Password Authentication
+  // =========================================================================
+  const loginWithEmail = useCallback(async (email, password) => {
+    setLoading(true);
+    try {
+      const data = await api.login(email, password);
+      const roleStr = String(data.user?.role || data.role || 'PATIENT').toLowerCase();
+      const userData = {
+        name: data.user?.name || (roleStr === 'doctor' ? 'Dr. Sarah Smith' : 'MedVault Patient'),
+        email: data.user?.email || email,
+        walletAddress: data.user?.walletAddress || data.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92',
+        role: roleStr,
+        sessionToken: data.sessionToken,
+        authType: 'email'
+      };
+      setUser(userData);
+      setIsConnected(true);
+      persistSession(userData);
+      addToast(`Welcome back, ${userData.name}!`, 'success');
+      await refreshRecords();
+      return userData;
+    } catch (err) {
+      console.error('[Email Login Error]:', err);
+      addToast(err.message || 'Login failed', 'error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [addToast, refreshRecords]);
+
+  const registerWithEmail = useCallback(async (email, password, role = 'patient', name = '') => {
+    setLoading(true);
+    try {
+      const data = await api.register(email, password, role, name);
+      const roleStr = String(data.user?.role || role).toLowerCase();
+      const userData = {
+        name: data.user?.name || name || (roleStr === 'doctor' ? 'Dr. Healthcare Provider' : 'MedVault Patient'),
+        email: data.user?.email || email,
+        walletAddress: data.user?.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92',
+        role: roleStr,
+        sessionToken: data.sessionToken,
+        authType: 'email'
+      };
+      setUser(userData);
+      setIsConnected(true);
+      persistSession(userData);
+      addToast(`Account created successfully! Welcome to MedVault.`, 'success');
+      await refreshRecords();
+      return userData;
+    } catch (err) {
+      console.error('[Registration Error]:', err);
+      addToast(err.message || 'Registration failed', 'error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [addToast, refreshRecords]);
+
   const signUp = useCallback(async ({ displayName, email, role, walletAddress }) => {
     return signIn({ walletAddress, role });
   }, [signIn]);
@@ -372,6 +431,8 @@ export function AppProvider({ children }) {
       toggleTheme,
       signUp,
       signIn,
+      loginWithEmail,
+      registerWithEmail,
       connectWallet,
       disconnectWallet,
       uploadRecord,
