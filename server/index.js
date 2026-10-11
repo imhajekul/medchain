@@ -35,6 +35,7 @@ import {
   createRazorpayOrder,
   verifyRazorpayPayment,
   handleRazorpayWebhook,
+  simulateRazorpayPayment,
   getPaymentStatus,
   getWalletBalance,
   getWalletTransactions
@@ -226,6 +227,11 @@ app.get(
   ['/payments/status', '/api/payments/status', '/payment/status', '/api/payment/status'],
   optionalAuth,
   getPaymentStatus
+);
+app.post(
+  ['/payments/simulate', '/api/payments/simulate', '/payment/simulate', '/api/payment/simulate'],
+  optionalAuth,
+  simulateRazorpayPayment
 );
 app.post(
   [

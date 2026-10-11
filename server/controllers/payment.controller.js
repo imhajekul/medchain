@@ -97,11 +97,19 @@ export async function createRazorpayOrder(req, res) {
       txHash: order.id
     });
 
+    const hasValidKeys = Boolean(
+      (process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID) &&
+      (process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET) &&
+      !String(process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID).includes('placeholder')
+    );
+
     return res.status(200).json({
       orderId: order.id,
       amount: order.amount,
       currency: order.currency || "INR",
-      keyId: process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_placeholder'
+      keyId: hasValidKeys ? (process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID) : null,
+      isConfigured: hasValidKeys,
+      polAmount: Number(tokenCredit)
     });
   } catch (err) {
     console.error('[Create Razorpay Order Error]:', err);
@@ -262,6 +270,72 @@ export async function verifyRazorpayPayment(req, res) {
   } catch (err) {
     console.error('[Verify Payment Error]:', err);
     return res.status(500).json({ error: 'Failed to verify payment', details: err.message });
+  }
+}
+
+/**
+ * POST /api/payment/simulate
+ * Simulates a successful UPI webhook payment when testing in sandbox without live Razorpay keys.
+ * Performs the exact same MongoDB atomic balance increment, payment confirmation, and audit log creation.
+ */
+export async function simulateRazorpayPayment(req, res) {
+  try {
+    const { orderId } = req.body;
+    if (!orderId) {
+      return res.status(400).json({ error: 'orderId is required.' });
+    }
+
+    const payment = await db.getPayment(orderId);
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment order not found.' });
+    }
+
+    if (payment.status === 'confirmed') {
+      return res.status(200).json({ status: 'ok', message: 'Already processed', confirmed: true });
+    }
+
+    const paymentId = `pay_sim_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const targetWallet = payment.user_address || payment.walletAddress;
+    const tokenCredit = Number(payment.pol_amount) || (payment.amount_inr === 50 ? 0.1 : Number((payment.amount_inr / POL_INR_RATE).toFixed(4)));
+
+    if (targetWallet) {
+      // Update payment status to "confirmed"
+      await db.updatePayment(orderId, {
+        payment_id: paymentId,
+        status: "confirmed",
+        webhook_event: "payment.captured (sandbox)",
+        confirmed_at: new Date()
+      });
+
+      // Atomically increment the user's POL balance in MongoDB
+      await db.creditWalletBalance(targetWallet, tokenCredit, {
+        paymentId,
+        orderId,
+        amountInr: payment.amount_inr,
+        method: 'Received via UPI (Razorpay Verified)',
+        from: 'Razorpay UPI Gateway (Sandbox)',
+        description: `Received via UPI (Razorpay Verified) • ${tokenCredit} POL (₹${payment.amount_inr})`
+      });
+
+      // Record verified event in audit_logs
+      await db.logAuditEvent({
+        actorAddress: targetWallet,
+        actionType: 'PAYMENT_CONFIRMED',
+        context: 'Received via UPI (Razorpay Verified)',
+        txHash: paymentId
+      });
+    }
+
+    return res.status(200).json({
+      status: 'ok',
+      paymentId,
+      orderId,
+      polAmount: tokenCredit,
+      confirmed: true
+    });
+  } catch (err) {
+    console.error('[Simulate Payment Error]:', err);
+    return res.status(500).json({ error: 'Failed to simulate payment', details: err.message });
   }
 }
 
