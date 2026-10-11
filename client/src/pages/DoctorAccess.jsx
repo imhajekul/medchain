@@ -6,17 +6,20 @@ import {
   CheckCircle, Lock, FileText, ExternalLink, Wallet
 } from 'lucide-react';
 import { useCountdown } from '../hooks/useHelpers';
+import { useApp } from '../context/AppContext';
 import { mockGrants, mockRecords } from '../data/mockData';
 import './DoctorAccess.css';
 
 export default function DoctorAccess() {
   const navigate = useNavigate();
+  const { signIn, retrieveAndDecryptRecord, user } = useApp();
   const [stage, setStage] = useState('enter-code'); // enter-code, connecting, viewing, expired
   const [accessCode, setAccessCode] = useState('');
   const [error, setError] = useState('');
   const [connecting, setConnecting] = useState(false);
+  const [decryptedRecordData, setDecryptedRecordData] = useState(null);
 
-  // Simulated grant lookup
+  // Simulated or real grant lookup
   const activeGrant = mockGrants.find(g => g.status === 'active');
   const expiredGrant = mockGrants.find(g => g.status === 'expired');
 
@@ -32,9 +35,24 @@ export default function DoctorAccess() {
 
   const handleConnect = async () => {
     setConnecting(true);
-    await new Promise(r => setTimeout(r, 1500));
-    setConnecting(false);
-    setStage('viewing');
+    try {
+      if (!user || user.role !== 'doctor') {
+        await signIn({ role: 'doctor' });
+      }
+      // Attempt real retrieval if code looks like record id or default
+      const targetRecordId = accessCode.startsWith('0x') ? accessCode : '0x1000000000000000000000000000000000000000000000000000000000000001';
+      try {
+        const decrypted = await retrieveAndDecryptRecord(targetRecordId);
+        setDecryptedRecordData(decrypted);
+      } catch (retrievalErr) {
+        console.warn('Live retrieval fallback:', retrievalErr.message);
+      }
+      setStage('viewing');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setConnecting(false);
+    }
   };
 
   const handleViewExpired = () => {

@@ -1,0 +1,132 @@
+// =============================================================================
+// MedVault Database Schema (Prisma ORM)
+// Optimized for Fast-Read Off-Chain Queries & On-Chain Event Synchronization
+// =============================================================================
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum Role {
+  PATIENT
+  DOCTOR
+}
+
+enum GrantStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum AuditEventType {
+  ISSUED
+  ACCESSED
+  EXPIRED
+  REVOKED
+}
+
+// -----------------------------------------------------------------------------
+// MODELS
+// -----------------------------------------------------------------------------
+
+/// User model anchored by Ethereum wallet address (EIP-4361 standard)
+model User {
+  walletAddress String   @id @db.VarChar(42) // Lowercase checksummed 0x address
+  role          Role     @default(PATIENT)
+  nonce         String   @db.VarChar(64)     // Ephemeral SIWE challenge nonce
+  createdAt     DateTime @default(now())
+
+  // Relations
+  recordsOwned    Record[]     @relation("RecordOwner")
+  grantsReceived  Grant[]      @relation("GranteeUser")
+  auditActions    AuditEvent[] @relation("ActorUser")
+
+  @@index([role])
+}
+
+/// Medical record metadata pointer to client-side AES-256 encrypted blobs
+/// INVARIANT: The server NEVER stores unencrypted medical data or master keys.
+model Record {
+  id                   String   @id @default(uuid()) @db.Uuid
+  recordIdHex          String   @unique @db.VarChar(66) // On-chain bytes32 ID (0x...)
+  ownerWallet          String   @db.VarChar(42)
+  owner                User     @relation("RecordOwner", fields: [ownerWallet], references: [walletAddress], onDelete: Cascade)
+  
+  storageCID           String   @db.VarChar(100)        // IPFS CID of AES-256 ciphertext
+  label                String   @db.VarChar(255)        // Plaintext label / description
+  encryptedKeyMaterial String   @db.Text                // DEK encrypted for patient's public key (base64)
+  contentHash          String   @db.VarChar(66)         // SHA-256 hash of ciphertext for tamper verification
+  fileSizeBytes        BigInt   @default(0)
+  mimeType             String   @default("application/octet-stream") @db.VarChar(100)
+  createdAt            DateTime @default(now())
+
+  // Relations
+  grants      Grant[]
+  auditEvents AuditEvent[]
+
+  @@index([ownerWallet])
+  @@index([recordIdHex])
+  @@index([storageCID])
+}
+
+/// Time-boxed access grants from patient to healthcare provider
+model Grant {
+  id                   String      @id @default(uuid()) @db.Uuid
+  grantIdHex          String      @unique @db.VarChar(66) // On-chain bytes32 ID
+  recordId             String      @db.Uuid
+  record               Record      @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  
+  granteeWallet        String      @db.VarChar(42)
+  grantee              User        @relation("GranteeUser", fields: [granteeWallet], references: [walletAddress], onDelete: Cascade)
+  
+  expiresAt            DateTime
+  status               GrantStatus @default(ACTIVE)
+  encryptedKeyMaterial String      @db.Text                // DEK asymmetrically wrapped for doctor's public key
+  txHash               String?     @db.VarChar(66)         // On-chain grant transaction hash
+  createdAt            DateTime    @default(now())
+
+  // Relations
+  auditEvents AuditEvent[]
+
+  @@index([granteeWallet, status, expiresAt])
+  @@index([recordId])
+  @@index([grantIdHex])
+}
+
+/// Read-optimized append-only audit trail replicating on-chain events
+model AuditEvent {
+  id          String         @id @default(uuid()) @db.Uuid
+  grantId     String?        @db.Uuid
+  grant       Grant?         @relation(fields: [grantId], references: [id], onDelete: SetNull)
+  
+  recordId    String         @db.Uuid
+  record      Record         @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  
+  actorWallet String         @db.VarChar(42)
+  actor       User           @relation("ActorUser", fields: [actorWallet], references: [walletAddress], onDelete: Cascade)
+  
+  eventType   AuditEventType
+  txHash      String?        @db.VarChar(66) // On-chain transaction hash (null if pending)
+  timestamp   DateTime       @default(now())
+
+  @@index([recordId, timestamp(sort: Desc)])
+  @@index([actorWallet])
+  @@index([grantId])
+  @@index([txHash])
+}
+
+/// Tracks blockchain indexer synchronization block height
+model IndexerState {
+  network          String   @id @db.VarChar(50) // e.g., 'polygon-amoy', 'base-sepolia'
+  lastIndexedBlock BigInt
+  updatedAt        DateTime @default(now()) @updatedAt
+}

@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # ─── 1. PostgreSQL 16 Enterprise Database ───────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: medvault-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-medvault}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medvault_secure_password_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-medvault}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/migrations/schema.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-medvault} -d ${POSTGRES_DB:-medvault}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - medvault-network
+
+  # ─── 2. MedVault Core Backend (Zero PHI Exposure) ──────────────
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: medvault-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-medvault}:${POSTGRES_PASSWORD:-medvault_secure_password_2026}@postgres:5432/${POSTGRES_DB:-medvault}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-medvault_super_secret_jwt_encryption_key_2026_prod}
+      RPC_URL: ${RPC_URL:-https://rpc-amoy.polygon.technology/}
+      CONTRACT_ADDRESS: ${CONTRACT_ADDRESS:-0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6}
+      RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY:-}
+      PINATA_API_KEY: ${PINATA_API_KEY:-}
+      PINATA_SECRET_KEY: ${PINATA_SECRET_KEY:-}
+      PINATA_JWT: ${PINATA_JWT:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-1000}
+    volumes:
+      - server_storage:/app/storage_blobs
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - medvault-network
+
+  # ─── 3. MedVault Web Client (Nginx + React SPA) ─────────────────
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+    container_name: medvault-client
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/nginx-health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - medvault-network
+
+volumes:
+  postgres_data:
+    name: medvault_postgres_data
+  server_storage:
+    name: medvault_server_storage
+
+networks:
+  medvault-network:
+    name: medvault-network
+    driver: bridge

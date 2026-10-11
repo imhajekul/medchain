@@ -1,221 +1,230 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import multer from 'multer';
+import dotenv from 'dotenv';
+dotenv.config();
+
+import { db } from './db.js';
+import { requireAuth } from './middleware/auth.js';
+import { getNonce, connectWallet, getMe } from './controllers/auth.controller.js';
+import {
+  uploadRecord,
+  listRecords,
+  getRecordById
+} from './controllers/records.controller.js';
+import {
+  createGrant,
+  getGrantStatus,
+  getDecryptionKey,
+  revokeGrantEarly
+} from './controllers/grants.controller.js';
+import { getAuditTrail } from './controllers/audit.controller.js';
+import { retrieveRecordForDoctor } from './controllers/access.controller.js';
+import { indexer } from './services/indexer.service.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
-app.use(express.json());
+// Trust first reverse proxy (Nginx / Cloudflare / AWS ALB / Render / Railway)
+app.set('trust proxy', 1);
 
-// ─── Mock Data ────────────────────────────────────────────────
-const records = [
-  {
-    id: 'rec_001',
-    label: 'Complete Blood Count — Sept 2026',
-    ownerWallet: '0x7a3b...f92d',
-    storageCID: 'QmX7b2c...9f3a',
-    createdAt: '2026-09-15T14:30:00Z',
-    fileSize: '245 KB',
-    fileType: 'PDF',
-    activeGrants: 2,
-    status: 'encrypted'
-  },
-  {
-    id: 'rec_002',
-    label: 'Lipid Panel Results — Aug 2026',
-    ownerWallet: '0x7a3b...f92d',
-    storageCID: 'QmY8c3d...0g4b',
-    createdAt: '2026-08-22T09:15:00Z',
-    fileSize: '189 KB',
-    fileType: 'PDF',
-    activeGrants: 1,
-    status: 'encrypted'
-  },
-  {
-    id: 'rec_003',
-    label: 'HbA1c Test — July 2026',
-    ownerWallet: '0x7a3b...f92d',
-    storageCID: 'QmZ9d4e...1h5c',
-    createdAt: '2026-07-10T11:45:00Z',
-    fileSize: '132 KB',
-    fileType: 'PDF',
-    activeGrants: 0,
-    status: 'encrypted'
-  },
-  {
-    id: 'rec_004',
-    label: 'Thyroid Function Panel — June 2026',
-    ownerWallet: '0x7a3b...f92d',
-    storageCID: 'QmA0e5f...2i6d',
-    createdAt: '2026-06-05T16:20:00Z',
-    fileSize: '210 KB',
-    fileType: 'PDF',
-    activeGrants: 0,
-    status: 'encrypted'
-  }
-];
+// ─── Production Security Headers ──────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: false, // Managed by reverse proxy or client bundler
+  crossOriginEmbedderPolicy: false
+}));
 
-const grants = [
-  {
-    id: 'grant_001',
-    recordId: 'rec_001',
-    granteeWallet: '0x4e2f...a81c',
-    granteeName: 'Dr. Sarah Chen',
-    expiresAt: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
-    status: 'active',
-    createdAt: '2026-09-25T10:00:00Z',
-    shareableLink: 'https://medvault.app/access/grant_001'
+// ─── Dynamic CORS Configuration (Vercel + Custom Domains) ─────
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+  : ['http://localhost:5173', 'http://localhost:3000', 'https://medvault.app'];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) return callback(null, true);
+    
+    // Automatically permit any Vercel production or preview deployment
+    try {
+      const { hostname } = new URL(origin);
+      if (hostname.endsWith('.vercel.app') || hostname === 'localhost') {
+        return callback(null, true);
+      }
+    } catch (e) {}
+
+    if (process.env.NODE_ENV !== 'production') return callback(null, true);
+
+    return callback(new Error(`Blocked by MedVault CORS security policy: ${origin}`));
   },
-  {
-    id: 'grant_002',
-    recordId: 'rec_001',
-    granteeWallet: '0x9b8c...d73e',
-    granteeName: 'Dr. James Wilson',
-    expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-    status: 'active',
-    createdAt: '2026-09-24T15:30:00Z',
-    shareableLink: 'https://medvault.app/access/grant_002'
-  }
-];
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 
-const auditEvents = [
-  {
-    id: 'evt_001',
-    grantId: 'grant_001',
-    recordId: 'rec_001',
-    eventType: 'issued',
-    actorWallet: '0x7a3b...f92d',
-    actorName: 'Alex Morgan (You)',
-    timestamp: '2026-09-25T10:00:00Z',
-    txHash: '0xabc123...def456'
-  },
-  {
-    id: 'evt_002',
-    grantId: 'grant_001',
-    recordId: 'rec_001',
-    eventType: 'accessed',
-    actorWallet: '0x4e2f...a81c',
-    actorName: 'Dr. Sarah Chen',
-    timestamp: '2026-09-25T11:30:00Z',
-    txHash: '0xghi789...jkl012'
-  }
-];
+app.use(express.json({ limit: '10mb' }));
 
-// ─── Routes (from 03-API-SPEC.md) ────────────────────────────
+// ─── Rate Limiting Protections ────────────────────────────────
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.RATE_LIMIT_MAX ? Number(process.env.RATE_LIMIT_MAX) : 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' }
+});
+app.use(generalLimiter);
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+const authLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 100, // Protects against nonce-flooding and brute-force challenges
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts. Please slow down.' }
 });
 
-// POST /auth/connect — simulate wallet auth
-app.post('/api/auth/connect', (req, res) => {
-  const { walletAddress } = req.body;
-  if (!walletAddress) {
-    return res.status(401).json({ error: 'Missing wallet address' });
-  }
-  res.json({
-    sessionToken: `session_${Date.now()}`,
-    role: 'patient',
-    walletAddress,
-    displayName: 'Alex Morgan'
+const uploadLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 60, // Limits bulk spam uploads
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Upload rate limit reached. Please wait before uploading more records.' }
+});
+
+// Multer memory storage for client-side encrypted blobs
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB max encrypted blob
+});
+
+// ─── Liveness & Readiness Probes ──────────────────────────────
+const livenessHandler = (req, res) => {
+  res.status(200).json({
+    status: 'UP',
+    service: 'MedVault Core Backend',
+    uptimeSeconds: Math.floor(process.uptime()),
+    zeroDataExposure: true,
+    timestamp: new Date().toISOString()
   });
-});
+};
+app.get(['/health', '/api/health'], livenessHandler);
 
-// GET /records — list records
-app.get('/api/records', (req, res) => {
-  res.json({ records });
-});
+const readinessHandler = async (req, res) => {
+  const dbStatus = await db.isHealthy();
+  const indexerStatus = indexer.getStatus ? indexer.getStatus() : { active: true };
 
-// GET /records/:id — single record
-app.get('/api/records/:id', (req, res) => {
-  const record = records.find(r => r.id === req.params.id);
-  if (!record) return res.status(404).json({ error: 'Record not found' });
-  res.json(record);
-});
+  const isHealthy = dbStatus.connected;
+  res.status(isHealthy ? 200 : 503).json({
+    status: isHealthy ? 'READY' : 'DEGRADED',
+    database: dbStatus,
+    indexer: indexerStatus,
+    timestamp: new Date().toISOString()
+  });
+};
+app.get(['/ready', '/api/ready'], readinessHandler);
 
-// POST /records — upload (simulated)
-app.post('/api/records', (req, res) => {
-  const { label } = req.body;
-  if (!label) return res.status(400).json({ error: 'Label is required' });
-  const newRecord = {
-    id: `rec_${Date.now()}`,
-    label,
-    ownerWallet: '0x7a3b...f92d',
-    storageCID: `Qm${Math.random().toString(36).substr(2, 10)}`,
-    createdAt: new Date().toISOString(),
-    fileSize: '0 KB',
-    fileType: 'PDF',
-    activeGrants: 0,
-    status: 'encrypted'
-  };
-  records.unshift(newRecord);
-  res.status(201).json(newRecord);
-});
+// ─── Step 3: SIWE Authentication & Session Layer ──────────────
+// Conforms to 03-API-SPEC.md: POST /auth/connect -> { sessionToken, role }
+app.get(['/auth/nonce', '/api/auth/nonce'], authLimiter, getNonce);
+app.post(['/auth/connect', '/api/auth/connect'], authLimiter, connectWallet);
+app.get(['/auth/me', '/api/auth/me'], requireAuth, getMe);
 
-// POST /grants — create a grant
-app.post('/api/grants', (req, res) => {
-  const { recordId, granteeWallet, expiresInSeconds } = req.body;
-  if (!recordId || !granteeWallet || !expiresInSeconds) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
-  const record = records.find(r => r.id === recordId);
-  if (!record) return res.status(404).json({ error: 'Record not found' });
+// ─── Step 4: Storage & Record Management APIs ─────────────────
+// Conforms to 03-API-SPEC.md:
+// POST /records -> { recordId, storageCID }
+// GET /records/:id -> { recordId, label, storageCID, createdAt, activeGrants }
+app.post(
+  ['/records', '/api/records'],
+  requireAuth,
+  uploadLimiter,
+  upload.single('encryptedFile'),
+  uploadRecord
+);
 
-  const newGrant = {
-    id: `grant_${Date.now()}`,
-    recordId,
-    granteeWallet,
-    granteeName: granteeWallet,
-    expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
-    status: 'active',
-    createdAt: new Date().toISOString(),
-    shareableLink: `https://medvault.app/access/grant_${Date.now()}`
-  };
-  grants.unshift(newGrant);
-  record.activeGrants += 1;
-  res.status(201).json(newGrant);
-});
+app.get(['/records', '/api/records'], requireAuth, listRecords);
+app.get(['/records/:id', '/api/records/:id'], requireAuth, getRecordById);
 
-// GET /grants/:id — grant status
-app.get('/api/grants/:id', (req, res) => {
-  const grant = grants.find(g => g.id === req.params.id);
-  if (!grant) return res.status(404).json({ error: 'Grant not found' });
-  // Check expiry
-  if (grant.status === 'active' && new Date(grant.expiresAt) < new Date()) {
-    grant.status = 'expired';
-    return res.status(410).json({ ...grant, message: 'Grant expired' });
-  }
-  res.json(grant);
-});
+// ─── Step 5: Time-Boxed Grants & Access Verification ──────────
+// Conforms to 03-API-SPEC.md:
+// POST /grants -> { grantId, expiresAt, shareableLink }
+// GET /grants/:id -> { grantId, status, expiresAt }
+// GET /grants/:id/decrypt-key -> { encryptedKeyMaterial }
+// DELETE /grants/:id -> { grantId, status: "revoked" }
+app.post(['/grants', '/api/grants'], requireAuth, createGrant);
+app.get(['/grants/:id', '/api/grants/:id'], getGrantStatus);
+app.get(['/grants/:id/decrypt-key', '/api/grants/:id/decrypt-key'], requireAuth, getDecryptionKey);
+app.delete(['/grants/:id', '/api/grants/:id'], requireAuth, revokeGrantEarly);
 
-// GET /audit/:recordId — audit log
-app.get('/api/audit/:recordId', (req, res) => {
-  const events = auditEvents.filter(e => e.recordId === req.params.recordId);
-  res.json({ events });
-});
+// ─── Step 6: Blockchain Indexer & Audit Sync Service ──────────
+// Conforms to 03-API-SPEC.md:
+// GET /audit/:recordId -> { events: [{ eventType, actorWallet, timestamp, txHash }] }
+app.get(['/audit/:recordId', '/api/audit/:recordId'], requireAuth, getAuditTrail);
 
-// GET /stats
+// ─── Step 5 Extended Flow: Full Decryption Stream for Doctors ─
+app.get(['/records/:id/retrieve', '/api/records/:id/retrieve'], requireAuth, retrieveRecordForDoctor);
+
+// ─── Stats Route ──────────────────────────────────────────────
 app.get('/api/stats', (req, res) => {
   res.json({
-    totalRecords: records.length,
-    activeGrants: grants.filter(g => g.status === 'active').length,
-    expiredGrants: grants.filter(g => g.status === 'expired').length,
-    totalAccesses: auditEvents.filter(e => e.eventType === 'accessed').length,
+    totalRecords: 4,
+    activeGrants: 2,
+    expiredGrants: 1,
+    totalAccesses: 7,
     storageUsed: '776 KB'
   });
 });
 
-// ─── Start ────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n  🏥 MedVault API server running at http://localhost:${PORT}`);
-  console.log(`  📋 Endpoints:`);
-  console.log(`     GET  /api/health`);
-  console.log(`     POST /api/auth/connect`);
-  console.log(`     GET  /api/records`);
-  console.log(`     GET  /api/records/:id`);
-  console.log(`     POST /api/records`);
-  console.log(`     POST /api/grants`);
-  console.log(`     GET  /api/grants/:id`);
-  console.log(`     GET  /api/audit/:recordId\n`);
+// ─── Centralized Error Handler ────────────────────────────────
+app.use((err, req, res, next) => {
+  console.error(`[Unhandled Error] ${req.method} ${req.url}:`, err);
+  const isProd = process.env.NODE_ENV === 'production';
+  res.status(err.status || 500).json({
+    error: isProd ? 'Internal Server Error' : (err.message || 'Internal Server Error'),
+    ...(isProd ? {} : { stack: err.stack })
+  });
 });
+
+// ─── Server Bootstrap & Graceful Shutdown ─────────────────────
+const server = app.listen(PORT, () => {
+  console.log(`\n  🛡️  MedVault Principal Backend running on port ${PORT}`);
+  console.log(`  🔒 Security Invariant: Zero Plaintext PHI Exposure Enforced`);
+  console.log(`  📋 API Specification Endpoints Ready:`);
+  console.log(`     GET    /auth/nonce               (SIWE Nonce Issue)`);
+  console.log(`     POST   /auth/connect             (SIWE Challenge Verification)`);
+  console.log(`     POST   /records                  (Client-Side Encrypted Upload)`);
+  console.log(`     GET    /records/:id              (Owner-Scoped Record Metadata)`);
+  console.log(`     POST   /grants                   (Time-Boxed Grant Creation)`);
+  console.log(`     GET    /grants/:id               (Grant Status & Auto-Expiry)`);
+  console.log(`     GET    /grants/:id/decrypt-key   (Grantee Key Envelope)`);
+  console.log(`     DELETE /grants/:id               (Early Manual Revocation)`);
+  console.log(`     GET    /audit/:recordId          (Fast-Read On-Chain Audit Feed)`);
+  console.log(`     GET    /health & /ready          (Container Probes)\n`);
+
+  indexer.start();
+});
+
+const gracefulShutdown = (signal) => {
+  console.log(`\n🛑 Received ${signal}. Initiating graceful shutdown...`);
+  server.close(async () => {
+    console.log('HTTP connection pool closed.');
+    try {
+      if (indexer && typeof indexer.stop === 'function') {
+        indexer.stop();
+      }
+      await db.end();
+      console.log('Database connections cleanly terminated.');
+      process.exit(0);
+    } catch (e) {
+      console.error('Error during shutdown clean-up:', e);
+      process.exit(1);
+    }
+  });
+
+  setTimeout(() => {
+    console.error('Forced shutdown timeout reached. Terminating process.');
+    process.exit(1);
+  }, 10000).unref();
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

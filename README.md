@@ -63,8 +63,23 @@ All features include **graceful error handling** using toast notifications and f
 
 ---
 
-## 🛠️ Setup Instructions
+## 🛠️ Setup & Deployment Instructions
+
+### Local Development
 1. **Clone the repository:** `git clone https://github.com/imhajekul/medchain.git`
-2. **Navigate into client:** `cd medchain/client`
-3. **Install dependencies:** `npm install`
-4. **Run the dev server:** `npm run dev`
+2. **Backend Setup:**
+   ```bash
+   cd server && npm install
+   npm run dev       # Starts API server on http://localhost:3001
+   npm test          # Runs end-to-end API specification test suite
+   ```
+3. **Frontend Setup:**
+   ```bash
+   cd ../client && npm install
+   npm run dev       # Starts Vite dev server on http://localhost:5173
+   ```
+
+### Production Deployment
+- **Frontend on Vercel + Backend on Render**: See comprehensive guide in [VERCEL_RENDER_DEPLOY.md](VERCEL_RENDER_DEPLOY.md).
+- **Docker Compose & Kubernetes**: See full operations manual in [DEPLOYMENT.md](DEPLOYMENT.md).
+

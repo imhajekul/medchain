@@ -1,0 +1,10 @@
+node_modules
+npm-debug.log
+.env
+.git
+.gitignore
+storage_blobs/*
+!storage_blobs/.gitkeep
+test-*.js
+coverage
+.DS_Store

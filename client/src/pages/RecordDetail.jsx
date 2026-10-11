@@ -22,10 +22,20 @@ export default function RecordDetail() {
   const [showGrantModal, setShowGrantModal] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [newGrant, setNewGrant] = useState(null);
+  const [liveAuditEvents, setLiveAuditEvents] = useState([]);
 
   const record = records.find(r => r.id === id);
   const recordGrants = getRecordGrants(id);
-  const auditEvents = getRecordAuditEvents(id);
+
+  useEffect(() => {
+    if (id) {
+      Promise.resolve(getRecordAuditEvents(id)).then(evts => {
+        if (Array.isArray(evts)) setLiveAuditEvents(evts);
+      }).catch(() => {});
+    }
+  }, [id, getRecordAuditEvents]);
+
+  const auditEvents = liveAuditEvents.length > 0 ? liveAuditEvents : [];
 
   if (!record) {
     return (

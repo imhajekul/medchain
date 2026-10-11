@@ -23,3 +23,9 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Local encrypted storage blobs & SQLite
+server/storage_blobs/*
+!server/storage_blobs/.gitkeep
+*.sqlite
+*.sqlite-journal
