@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react';
  * Hook for countdown timer - used for grant expiry countdowns
  */
 export function useCountdown(targetDate) {
-  const [timeLeft, setTimeLeft] = useState(calculateTimeLeft(targetDate));
+  const [timeLeft, setTimeLeft] = useState(() => calculateTimeLeft(targetDate));
 
   useEffect(() => {
+    if (!targetDate) return;
     const timer = setInterval(() => {
       setTimeLeft(calculateTimeLeft(targetDate));
     }, 1000);
@@ -18,7 +19,14 @@ export function useCountdown(targetDate) {
 }
 
 function calculateTimeLeft(targetDate) {
-  const diff = new Date(targetDate) - new Date();
+  if (!targetDate) {
+    return { expired: true, days: 0, hours: 0, minutes: 0, seconds: 0, total: 0 };
+  }
+  const target = new Date(targetDate);
+  if (isNaN(target.getTime())) {
+    return { expired: true, days: 0, hours: 0, minutes: 0, seconds: 0, total: 0 };
+  }
+  const diff = target.getTime() - Date.now();
 
   if (diff <= 0) {
     return { expired: true, days: 0, hours: 0, minutes: 0, seconds: 0, total: 0 };
@@ -47,9 +55,10 @@ export function formatWallet(address) {
  * Format relative time
  */
 export function formatRelativeTime(dateStr) {
+  if (!dateStr) return 'Just now';
   const date = new Date(dateStr);
-  const now = new Date();
-  const diff = now - date;
+  if (isNaN(date.getTime())) return 'Just now';
+  const diff = Date.now() - date.getTime();
   const seconds = Math.floor(diff / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
@@ -65,7 +74,10 @@ export function formatRelativeTime(dateStr) {
  * Format date for display
  */
 export function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString('en-US', {
+  if (!dateStr) return 'N/A';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return 'N/A';
+  return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric'
@@ -76,7 +88,10 @@ export function formatDate(dateStr) {
  * Format date and time
  */
 export function formatDateTime(dateStr) {
-  return new Date(dateStr).toLocaleString('en-US', {
+  if (!dateStr) return 'N/A';
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return 'N/A';
+  return date.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

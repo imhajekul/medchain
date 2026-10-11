@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { AppProvider, useApp } from './context/AppContext';
 import Navbar from './components/layout/Navbar';
 import ToastContainer from './components/shared/Toast';
+import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import Landing from './pages/Landing';
 import Auth from './pages/Auth';
 import Dashboard from './pages/Dashboard';
@@ -97,7 +98,9 @@ export default function App() {
     <BrowserRouter>
       <AppProvider>
         <Navbar />
-        <AnimatedRoutes />
+        <ErrorBoundary>
+          <AnimatedRoutes />
+        </ErrorBoundary>
         <ToastContainer />
         <div 
           style={{

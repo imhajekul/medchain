@@ -1,12 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  ArrowLeft, FileText, Lock, Shield, Clock, Eye, Copy, Check, Share2,
-  Activity, X, ExternalLink, ChevronRight
+  ArrowLeft, FileText, Lock, Shield, Clock, Copy, Check, Share2,
+  Activity, X, ExternalLink
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { useCountdown, formatDate, formatDateTime, formatRelativeTime } from '../hooks/useHelpers';
+import { useCountdown, formatDate, formatRelativeTime } from '../hooks/useHelpers';
+import { api } from '../services/api';
+import { ErrorBoundary } from '../components/shared/ErrorBoundary';
 import './RecordDetail.css';
 
 const itemVariants = {
@@ -14,38 +16,146 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.4 } }
 };
 
-export default function RecordDetail() {
+const expiryPresets = [
+  { label: '1 Hour', value: 3600 },
+  { label: '24 Hours', value: 86400 },
+  { label: '7 Days', value: 604800 },
+  { label: '30 Days', value: 2592000 }
+];
+
+function RecordDetailContent() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { records, getRecordGrants, getRecordAuditEvents, createGrant, addToast } = useApp();
+  const { records, authLoading, getRecordGrants, getRecordAuditEvents, createGrant, addToast } = useApp();
+
+  const [record, setRecord] = useState(null);
+  const [fetching, setFetching] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
+  const [liveAuditEvents, setLiveAuditEvents] = useState([]);
   const [showGrantModal, setShowGrantModal] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [newGrant, setNewGrant] = useState(null);
-  const [liveAuditEvents, setLiveAuditEvents] = useState([]);
 
-  const record = records.find(r => r.id === id);
-  const recordGrants = getRecordGrants(id);
-
+  // 1. Fetch & Hydrate Record Data
   useEffect(() => {
-    if (id) {
-      Promise.resolve(getRecordAuditEvents(id)).then(evts => {
-        if (Array.isArray(evts)) setLiveAuditEvents(evts);
-      }).catch(() => {});
+    let isMounted = true;
+
+    if (!id) {
+      setFetching(false);
+      setFetchError('No record ID specified in the URL.');
+      return;
     }
+
+    async function resolveRecord() {
+      // Check existing context state first
+      const existing = records?.find(r => r?.id === id || r?.recordId === id);
+      if (existing) {
+        setRecord(existing);
+        setFetching(false);
+      }
+
+      // Fetch fresh data from backend API
+      try {
+        const fresh = await api.getRecordById(id);
+        if (isMounted && fresh) {
+          const grantsArray = Array.isArray(fresh.activeGrants) ? fresh.activeGrants : [];
+          setRecord(prev => ({
+            ...(prev || {}),
+            id: fresh.recordId || id,
+            label: fresh.label || prev?.label || 'Medical Health Record',
+            storageCID: fresh.storageCID || prev?.storageCID || 'N/A',
+            createdAt: fresh.createdAt || prev?.createdAt,
+            activeGrants: typeof fresh.activeGrants === 'number' ? fresh.activeGrants : grantsArray.length,
+            grantsList: grantsArray,
+            fileType: prev?.fileType || 'PDF',
+            fileSize: prev?.fileSize || 'Standard',
+            status: prev?.status || 'encrypted'
+          }));
+          setFetchError(null);
+        }
+      } catch (err) {
+        if (!existing && isMounted) {
+          console.warn('[RecordDetail] Direct fetch note:', err.message);
+          if (!authLoading) {
+            setFetchError(err.message || 'Record not found or access denied.');
+          }
+        }
+      } finally {
+        if (isMounted) {
+          setFetching(false);
+        }
+      }
+    }
+
+    resolveRecord();
+    return () => { isMounted = false; };
+  }, [id, records, authLoading]);
+
+  // 2. Fetch Audit Events
+  useEffect(() => {
+    let isMounted = true;
+    if (id && getRecordAuditEvents) {
+      Promise.resolve(getRecordAuditEvents(id))
+        .then(evts => {
+          if (isMounted && Array.isArray(evts)) {
+            setLiveAuditEvents(evts);
+          }
+        })
+        .catch(() => {});
+    }
+    return () => { isMounted = false; };
   }, [id, getRecordAuditEvents]);
 
-  const auditEvents = liveAuditEvents.length > 0 ? liveAuditEvents : [];
+  // Combine context grants and API grants safely
+  const contextGrants = (id && getRecordGrants) ? getRecordGrants(id) : [];
+  const recordGrants = (contextGrants && contextGrants.length > 0)
+    ? contextGrants
+    : (record?.grantsList || []);
 
+  const auditEvents = Array.isArray(liveAuditEvents) ? liveAuditEvents : [];
+
+  const handleGrantCreated = (grant) => {
+    setNewGrant(grant);
+    setShowGrantModal(false);
+    setShowConfirmation(true);
+    // Refresh record activeGrants count
+    setRecord(prev => prev ? {
+      ...prev,
+      activeGrants: (typeof prev.activeGrants === 'number' ? prev.activeGrants : 0) + 1
+    } : prev);
+  };
+
+  // Loading State
+  if (authLoading || (fetching && !record)) {
+    return (
+      <div className="record-detail page-wrapper">
+        <div className="container" style={{ textAlign: 'center', padding: '80px 0' }}>
+          <motion.div
+            className="auth-spinner"
+            style={{ width: '40px', height: '40px', margin: '0 auto 16px', borderTopColor: 'var(--color-primary)' }}
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+          />
+          <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px' }}>Decrypting Record Metadata...</h3>
+          <p style={{ color: 'var(--color-text-secondary)', fontSize: '14px' }}>Verifying your sovereign on-chain ownership.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Record Not Found State
   if (!record) {
     return (
       <div className="record-detail page-wrapper">
         <div className="container">
-          <div className="empty-state">
-            <div className="empty-state-icon"><FileText size={32} /></div>
-            <h3 className="empty-state-title">Record not found</h3>
-            <p className="empty-state-text">This record doesn't exist or you don't have access.</p>
+          <div className="empty-state glass-card" style={{ padding: '40px 24px', textAlign: 'center', maxWidth: '500px', margin: '40px auto' }}>
+            <div className="empty-state-icon" style={{ margin: '0 auto 16px' }}><FileText size={36} /></div>
+            <h3 className="empty-state-title" style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '10px' }}>Record Not Found</h3>
+            <p className="empty-state-text" style={{ fontSize: '14px', color: 'var(--color-text-secondary)', marginBottom: '24px' }}>
+              {fetchError || `Medical record with ID "${id}" could not be located or you don't have access.`}
+            </p>
             <button className="btn btn-primary" onClick={() => navigate('/dashboard')}>
-              Back to Dashboard
+              <ArrowLeft size={16} /> Back to Dashboard
             </button>
           </div>
         </div>
@@ -53,11 +163,9 @@ export default function RecordDetail() {
     );
   }
 
-  const handleGrantCreated = (grant) => {
-    setNewGrant(grant);
-    setShowGrantModal(false);
-    setShowConfirmation(true);
-  };
+  const activeGrantsDisplayCount = typeof record.activeGrants === 'number'
+    ? record.activeGrants
+    : (Array.isArray(record.activeGrants) ? record.activeGrants.length : recordGrants.length);
 
   return (
     <div className="record-detail page-wrapper">
@@ -90,15 +198,15 @@ export default function RecordDetail() {
               <FileText size={24} />
             </div>
             <div className="record-header-info">
-              <h1 className="record-header-title">{record.label}</h1>
+              <h1 className="record-header-title">{record.label || 'Medical Record'}</h1>
               <div className="record-header-meta">
-                <motion.span 
+                <motion.span
                   className="badge badge-success"
                   whileHover={{ scale: 1.05, boxShadow: "0 0 15px rgba(16, 185, 129, 0.4)" }}
                 >
                   <Lock size={10} /> Encrypted
                 </motion.span>
-                <span>{record.fileType} • {record.fileSize}</span>
+                <span>{record.fileType || 'PDF'} • {record.fileSize || 'Standard'}</span>
                 <span>Uploaded {formatDate(record.createdAt)}</span>
               </div>
             </div>
@@ -116,15 +224,17 @@ export default function RecordDetail() {
           <div className="record-header-details">
             <div className="detail-item">
               <span className="detail-label">Storage CID</span>
-              <code className="detail-value">{record.storageCID}</code>
+              <code className="detail-value">{record.storageCID || 'N/A'}</code>
             </div>
             <div className="detail-item">
               <span className="detail-label">Active Grants</span>
-              <span className="detail-value">{record.activeGrants}</span>
+              <span className="detail-value">{activeGrantsDisplayCount}</span>
             </div>
             <div className="detail-item">
               <span className="detail-label">Status</span>
-              <span className="detail-value" style={{ textTransform: 'capitalize' }}>{record.status}</span>
+              <span className="detail-value" style={{ textTransform: 'capitalize' }}>
+                {record.status || 'encrypted'}
+              </span>
             </div>
           </div>
         </motion.div>
@@ -154,7 +264,7 @@ export default function RecordDetail() {
             ) : (
               <div className="grants-detail-list">
                 {recordGrants.map((grant, i) => (
-                  <GrantCard key={grant.id} grant={grant} index={i} />
+                  <GrantCard key={grant?.id || grant?.grantId || i} grant={grant} index={i} />
                 ))}
               </div>
             )}
@@ -183,48 +293,50 @@ export default function RecordDetail() {
               </div>
             ) : (
               <div className="audit-timeline">
-                {auditEvents.map((event, i) => (
-                  <motion.div
-                    key={event.id}
-                    className="audit-event"
-                    variants={itemVariants}
-                    initial="hidden"
-                    animate="show"
-                    transition={{ delay: i * 0.05 }}
-                  >
-                    <div className={`audit-event-dot audit-dot-${event.eventType}`} />
-                    <div className="audit-event-content">
-                      <div className="audit-event-header">
-                        <motion.span 
-                          className={`badge badge-${
-                            event.eventType === 'issued' ? 'accent' :
-                            event.eventType === 'accessed' ? 'blue' : 'warning'
-                          }`}
-                          whileHover={{ scale: 1.05, boxShadow: `0 0 15px var(--color-${
-                            event.eventType === 'issued' ? 'accent' :
-                            event.eventType === 'accessed' ? 'blue' : 'warning'
-                          }-glow, rgba(168, 85, 247, 0.3))` }}
-                        >
-                          {event.eventType === 'issued' ? 'Grant Issued' :
-                           event.eventType === 'accessed' ? 'Record Accessed' : 'Grant Expired'}
-                        </motion.span>
-                        <span className="audit-event-time">{formatRelativeTime(event.timestamp)}</span>
+                {auditEvents.map((event, i) => {
+                  const eventType = String(event?.eventType || event?.action || 'accessed').toLowerCase();
+                  return (
+                    <motion.div
+                      key={event?.id || event?.txHash || i}
+                      className="audit-event"
+                      variants={itemVariants}
+                      initial="hidden"
+                      animate="show"
+                      transition={{ delay: i * 0.05 }}
+                    >
+                      <div className={`audit-event-dot audit-dot-${eventType}`} />
+                      <div className="audit-event-content">
+                        <div className="audit-event-header">
+                          <motion.span
+                            className={`badge badge-${
+                              eventType === 'issued' ? 'accent' :
+                              eventType === 'accessed' ? 'blue' : 'warning'
+                            }`}
+                          >
+                            {eventType === 'issued' ? 'Grant Issued' :
+                             eventType === 'accessed' ? 'Record Accessed' :
+                             eventType === 'revoked' ? 'Grant Revoked' : 'Audit Event'}
+                          </motion.span>
+                          <span className="audit-event-time">
+                            {formatRelativeTime(event?.timestamp || event?.blockTimestamp)}
+                          </span>
+                        </div>
+                        <p className="audit-event-actor">
+                          {eventType === 'issued'
+                            ? <>By <strong>{event?.actorName || event?.actorAddress || 'Owner'}</strong> → <strong>{event?.targetName || 'Doctor'}</strong></>
+                            : eventType === 'accessed'
+                              ? <>By <strong>{event?.actorName || event?.actorAddress || 'Healthcare Provider'}</strong></>
+                              : <>Action on <strong>{event?.recordIdHex || id}</strong></>
+                          }
+                        </p>
+                        <div className="audit-event-tx">
+                          <code>{event?.txHash || '0x...'}</code>
+                          <ExternalLink size={12} />
+                        </div>
                       </div>
-                      <p className="audit-event-actor">
-                        {event.eventType === 'issued'
-                          ? <>By <strong>{event.actorName}</strong> → <strong>{event.targetName}</strong></>
-                          : event.eventType === 'accessed'
-                            ? <>By <strong>{event.actorName}</strong></>
-                            : 'Auto-expired by system'
-                        }
-                      </p>
-                      <div className="audit-event-tx">
-                        <code>{event.txHash}</code>
-                        <ExternalLink size={12} />
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
+                    </motion.div>
+                  );
+                })}
               </div>
             )}
           </motion.div>
@@ -257,8 +369,9 @@ export default function RecordDetail() {
 
 /* --- Grant Card --- */
 function GrantCard({ grant }) {
-  const timeLeft = useCountdown(grant.expiresAt);
-  const isActive = grant.status === 'active' && !timeLeft.expired;
+  const expiryDate = grant?.expiresAt || grant?.validTo;
+  const timeLeft = useCountdown(expiryDate);
+  const isActive = (grant?.status === 'active' || !grant?.isRevoked) && !timeLeft.expired;
 
   return (
     <motion.div
@@ -267,12 +380,12 @@ function GrantCard({ grant }) {
     >
       <div className="grant-detail-top">
         <div className="grant-detail-info">
-          <p className="grant-detail-grantee">{grant.granteeName}</p>
-          <p className="grant-detail-wallet">{grant.granteeWallet}</p>
+          <p className="grant-detail-grantee">{grant?.granteeName || 'Healthcare Provider'}</p>
+          <p className="grant-detail-wallet">{grant?.granteeWallet || grant?.granteeAddress || '0x...'}</p>
         </div>
-        <motion.div 
+        <motion.div
           className={`badge ${isActive ? 'badge-success' : 'badge-warning'}`}
-          whileHover={{ scale: 1.05, boxShadow: isActive ? "0 0 15px rgba(16, 185, 129, 0.4)" : "0 0 15px rgba(245, 158, 11, 0.4)" }}
+          whileHover={{ scale: 1.05 }}
         >
           {isActive && <span className="pulse-dot" style={{ width: 6, height: 6 }} />}
           {isActive ? 'Active' : 'Expired'}
@@ -288,29 +401,39 @@ function GrantCard({ grant }) {
         </div>
       )}
       <div className="grant-detail-meta">
-        <span>Created {formatRelativeTime(grant.createdAt)}</span>
+        <span>Created {formatRelativeTime(grant?.createdAt || grant?.validFrom)}</span>
       </div>
     </motion.div>
   );
 }
 
-/* --- Grant Access Modal (Screen 5) --- */
+/* --- Grant Access Modal --- */
 function GrantModal({ recordId, onClose, onCreated }) {
   const { createGrant, loading, addToast } = useApp();
   const [granteeWallet, setGranteeWallet] = useState('');
   const [selectedExpiry, setSelectedExpiry] = useState(86400);
   const [customHours, setCustomHours] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!granteeWallet.trim()) return;
-    const expiry = selectedExpiry || (parseInt(customHours) * 3600);
+    const expiry = selectedExpiry || (parseInt(customHours, 10) * 3600);
     if (!expiry || expiry <= 0 || isNaN(expiry)) {
-      addToast('Please specify a valid access duration limit.', 'error');
+      addToast?.('Please specify a valid access duration limit.', 'error');
       return;
     }
-    const grant = await createGrant(recordId, granteeWallet.trim(), expiry);
-    onCreated(grant);
+
+    setIsSubmitting(true);
+    try {
+      const grant = await createGrant(recordId, granteeWallet.trim(), expiry);
+      onCreated(grant);
+    } catch (err) {
+      console.error('[Grant Creation Error]:', err);
+      addToast?.(err.message || 'Failed to create access grant', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -332,20 +455,21 @@ function GrantModal({ recordId, onClose, onCreated }) {
         <div className="modal-header">
           <h2 className="modal-title">
             <Share2 size={20} />
-            Grant Access
+            Grant Doctor Access
           </h2>
-          <button className="btn btn-icon btn-ghost" onClick={onClose}>
+          <button className="btn btn-icon btn-ghost" onClick={onClose} aria-label="Close modal">
             <X size={18} />
           </button>
         </div>
 
         <form className="modal-body" onSubmit={handleSubmit}>
           <div className="input-group">
-            <label className="input-label">Recipient Wallet Address</label>
+            <label className="input-label" htmlFor="grantee-wallet">Recipient Doctor Wallet Address</label>
             <input
+              id="grantee-wallet"
               className="input-field"
               type="text"
-              placeholder="0x... or invite code"
+              placeholder="0x... doctor wallet or identifier"
               value={granteeWallet}
               onChange={e => setGranteeWallet(e.target.value)}
               autoFocus
@@ -353,7 +477,7 @@ function GrantModal({ recordId, onClose, onCreated }) {
           </div>
 
           <div className="input-group">
-            <label className="input-label">Access Duration</label>
+            <label className="input-label">Access Duration (Auto-Expires)</label>
             <div className="expiry-grid">
               {expiryPresets.map(preset => (
                 <motion.button
@@ -379,7 +503,7 @@ function GrantModal({ recordId, onClose, onCreated }) {
                   <input
                     className="input-field"
                     type="number"
-                    placeholder="Enter hours"
+                    placeholder="Enter custom hours"
                     value={customHours}
                     onChange={e => setCustomHours(e.target.value)}
                     min="1"
@@ -392,18 +516,18 @@ function GrantModal({ recordId, onClose, onCreated }) {
 
           <div className="modal-info">
             <Shield size={16} />
-            <p>This creates an on-chain access grant. The recipient can decrypt and view the record until the grant expires.</p>
+            <p>Creates a cryptographic on-chain access grant. The recipient can decrypt and review this record until the time-box expires.</p>
           </div>
 
           <motion.button
             type="submit"
             className="btn btn-primary btn-lg"
             style={{ width: '100%' }}
-            disabled={!granteeWallet.trim() || loading}
+            disabled={!granteeWallet.trim() || loading || isSubmitting}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            {loading ? 'Creating Grant...' : 'Create Access Grant'}
+            {loading || isSubmitting ? 'Registering Grant On-Chain...' : 'Create Time-Boxed Grant'}
           </motion.button>
         </form>
       </motion.div>
@@ -411,15 +535,19 @@ function GrantModal({ recordId, onClose, onCreated }) {
   );
 }
 
-/* --- Grant Confirmation (Screen 6) --- */
+/* --- Grant Confirmation --- */
 function GrantConfirmation({ grant, onClose }) {
   const [copied, setCopied] = useState(false);
-  const timeLeft = useCountdown(grant.expiresAt);
+  const expiryDate = grant?.expiresAt || grant?.validTo;
+  const timeLeft = useCountdown(expiryDate);
+  const shareLink = grant?.shareableLink || (grant?.id ? `${window.location.origin}/doctor-access?code=${grant.id}` : '');
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(grant.shareableLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (shareLink) {
+      navigator.clipboard.writeText(shareLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   return (
@@ -441,9 +569,9 @@ function GrantConfirmation({ grant, onClose }) {
         <div className="modal-header">
           <h2 className="modal-title">
             <Check size={20} />
-            Grant Created!
+            Access Grant Registered!
           </h2>
-          <button className="btn btn-icon btn-ghost" onClick={onClose}>
+          <button className="btn btn-icon btn-ghost" onClick={onClose} aria-label="Close modal">
             <X size={18} />
           </button>
         </div>
@@ -471,20 +599,20 @@ function GrantConfirmation({ grant, onClose }) {
           <div className="confirmation-details">
             <div className="confirmation-detail">
               <span className="detail-label">Recipient</span>
-              <span className="detail-value">{grant.granteeWallet}</span>
+              <span className="detail-value">{grant?.granteeWallet || grant?.granteeAddress || 'Doctor'}</span>
             </div>
             <div className="confirmation-detail">
               <span className="detail-label">Grant ID</span>
-              <code className="detail-value">{grant.id}</code>
+              <code className="detail-value">{grant?.id || grant?.grantId || 'grant_id'}</code>
             </div>
           </div>
 
           <div className="confirmation-link">
-            <label className="input-label">Shareable Link</label>
+            <label className="input-label">Doctor Access Link</label>
             <div className="link-copy-row">
               <input
                 className="input-field"
-                value={grant.shareableLink}
+                value={shareLink}
                 readOnly
               />
               <motion.button
@@ -497,7 +625,7 @@ function GrantConfirmation({ grant, onClose }) {
                 {copied ? 'Copied!' : 'Copy'}
               </motion.button>
             </div>
-            <p className="link-hint">Send this link to your doctor. They'll need to connect their wallet to view the record.</p>
+            <p className="link-hint">Send this secure link to your healthcare provider to allow in-browser decryption.</p>
           </div>
 
           <motion.button
@@ -512,5 +640,13 @@ function GrantConfirmation({ grant, onClose }) {
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+export default function RecordDetail() {
+  return (
+    <ErrorBoundary title="Record View Error">
+      <RecordDetailContent />
+    </ErrorBoundary>
   );
 }
