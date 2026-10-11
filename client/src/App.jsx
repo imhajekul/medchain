@@ -9,6 +9,11 @@ import Auth from './pages/Auth';
 import Dashboard from './pages/Dashboard';
 import UploadRecord from './pages/UploadRecord';
 import RecordDetail from './pages/RecordDetail';
+import RecordsPage from './pages/RecordsPage';
+import AccessGrantsPage from './pages/AccessGrantsPage';
+import ActivityPage from './pages/ActivityPage';
+import SecurityPage from './pages/SecurityPage';
+import SettingsPage from './pages/SettingsPage';
 import DoctorAccess from './pages/DoctorAccess';
 import AiAssistant from './pages/AiAssistant';
 import Wallet from './pages/Wallet';
@@ -116,9 +121,25 @@ function AnimatedRoutes() {
             <PageTransition><Dashboard /></PageTransition>
           </PatientRoute>
         } />
+        {/* Dedicated Records Management Routes */}
+        <Route path="/records" element={
+          <PatientRoute>
+            <PageTransition><RecordsPage /></PageTransition>
+          </PatientRoute>
+        } />
+        <Route path="/records/upload" element={
+          <PatientRoute>
+            <PageTransition><UploadRecord /></PageTransition>
+          </PatientRoute>
+        } />
         <Route path="/upload" element={
           <PatientRoute>
             <PageTransition><UploadRecord /></PageTransition>
+          </PatientRoute>
+        } />
+        <Route path="/records/:id" element={
+          <PatientRoute>
+            <PageTransition><RecordDetail /></PageTransition>
           </PatientRoute>
         } />
         <Route path="/record/:id" element={
@@ -126,6 +147,51 @@ function AnimatedRoutes() {
             <PageTransition><RecordDetail /></PageTransition>
           </PatientRoute>
         } />
+        {/* Dedicated Access Grants & Permissions */}
+        <Route path="/grants" element={
+          <PatientRoute>
+            <PageTransition><AccessGrantsPage /></PageTransition>
+          </PatientRoute>
+        } />
+        <Route path="/access-grants" element={
+          <PatientRoute>
+            <PageTransition><AccessGrantsPage /></PageTransition>
+          </PatientRoute>
+        } />
+        {/* Dedicated Activity & Audit Logs */}
+        <Route path="/activity" element={
+          <AuthenticatedRoute>
+            <PageTransition><ActivityPage /></PageTransition>
+          </AuthenticatedRoute>
+        } />
+        <Route path="/audit-logs" element={
+          <AuthenticatedRoute>
+            <PageTransition><ActivityPage /></PageTransition>
+          </AuthenticatedRoute>
+        } />
+        {/* Dedicated Key Management & Security */}
+        <Route path="/security" element={
+          <AuthenticatedRoute>
+            <PageTransition><SecurityPage /></PageTransition>
+          </AuthenticatedRoute>
+        } />
+        <Route path="/keys" element={
+          <AuthenticatedRoute>
+            <PageTransition><SecurityPage /></PageTransition>
+          </AuthenticatedRoute>
+        } />
+        {/* Dedicated Account & Profile Settings */}
+        <Route path="/settings" element={
+          <AuthenticatedRoute>
+            <PageTransition><SettingsPage /></PageTransition>
+          </AuthenticatedRoute>
+        } />
+        <Route path="/profile" element={
+          <AuthenticatedRoute>
+            <PageTransition><SettingsPage /></PageTransition>
+          </AuthenticatedRoute>
+        } />
+        {/* Doctor Portal */}
         <Route path="/doctor-access" element={
           <DoctorRoute>
             <PageTransition><DoctorAccess /></PageTransition>

@@ -231,6 +231,20 @@ export const api = {
     return handleApiResponse(res, 'Failed to fetch audit trail');
   },
 
+  async getAuditLogs() {
+    const res = await fetch(`${API_BASE}/audit`, {
+      headers: { ...getAuthHeaders() }
+    });
+    return handleApiResponse(res, 'Failed to fetch audit logs');
+  },
+
+  async getSecurityInfo() {
+    const res = await fetch(`${API_BASE}/security/info`, {
+      headers: { ...getAuthHeaders() }
+    });
+    return handleApiResponse(res, 'Failed to fetch security information');
+  },
+
   // --- Step 5: Secure Doctor Retrieval ---
   async retrieveRecordForDoctor(recordIdHex) {
     const res = await fetch(`${API_BASE}/records/${recordIdHex}/retrieve`, {

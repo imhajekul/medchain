@@ -265,7 +265,7 @@ export default function Dashboard() {
             <motion.button
               type="button"
               className="btn btn-primary"
-              onClick={() => setShowUploadModal(true)}
+              onClick={() => navigate('/records/upload')}
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
             >
@@ -315,7 +315,10 @@ export default function Dashboard() {
         <motion.div className="stats-cards" variants={itemVariants}>
           <motion.div
             className="stat-card glass-card"
-            whileHover={{ y: -3, borderColor: 'rgba(2, 132, 199, 0.3)' }}
+            whileHover={{ y: -3, borderColor: 'rgba(2, 132, 199, 0.4)' }}
+            onClick={() => navigate('/records')}
+            style={{ cursor: 'pointer' }}
+            title="View all records on dedicated page"
           >
             <div className="stat-card-icon stat-card-icon-accent">
               <FileText size={20} />
@@ -328,7 +331,10 @@ export default function Dashboard() {
 
           <motion.div
             className="stat-card glass-card"
-            whileHover={{ y: -3, borderColor: 'rgba(59, 130, 246, 0.3)' }}
+            whileHover={{ y: -3, borderColor: 'rgba(59, 130, 246, 0.4)' }}
+            onClick={() => navigate('/grants')}
+            style={{ cursor: 'pointer' }}
+            title="Manage all doctor access grants"
           >
             <div className="stat-card-icon stat-card-icon-blue">
               <Shield size={20} />
@@ -341,20 +347,26 @@ export default function Dashboard() {
 
           <motion.div
             className="stat-card glass-card"
-            whileHover={{ y: -3, borderColor: 'rgba(168, 85, 247, 0.3)' }}
+            whileHover={{ y: -3, borderColor: 'rgba(168, 85, 247, 0.4)' }}
+            onClick={() => navigate('/activity')}
+            style={{ cursor: 'pointer' }}
+            title="View activity & audit history"
           >
             <div className="stat-card-icon stat-card-icon-purple">
-              <Eye size={20} />
+              <Activity size={20} />
             </div>
             <div className="stat-card-content">
               <span className="stat-card-value">{stats?.totalAccesses || 0}</span>
-              <span className="stat-card-label">Total Accesses</span>
+              <span className="stat-card-label">Activity Events</span>
             </div>
           </motion.div>
 
           <motion.div
             className="stat-card glass-card"
-            whileHover={{ y: -3, borderColor: 'rgba(245, 158, 11, 0.3)' }}
+            whileHover={{ y: -3, borderColor: 'rgba(245, 158, 11, 0.4)' }}
+            onClick={() => navigate('/grants')}
+            style={{ cursor: 'pointer' }}
+            title="View all expired or revoked grants"
           >
             <div className="stat-card-icon stat-card-icon-warning">
               <Clock size={20} />
@@ -369,7 +381,17 @@ export default function Dashboard() {
         {/* Records Section */}
         <motion.div className="dashboard-section" variants={itemVariants}>
           <div className="section-row" style={{ flexWrap: 'wrap', gap: '1rem' }}>
-            <h2 className="section-heading">Encrypted Medical Records</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <h2 className="section-heading" style={{ margin: 0 }}>Encrypted Medical Records</h2>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => navigate('/records')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--color-primary)' }}
+              >
+                View All <ArrowRight size={14} />
+              </button>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1, justifyContent: 'flex-end' }}>
               {/* Real-time search bar */}
               <div className="input-group" style={{ margin: 0, maxWidth: 320, width: '100%' }}>
@@ -476,7 +498,7 @@ export default function Dashboard() {
                       className="record-card glass-card"
                       variants={itemVariants}
                       whileHover={{ y: -4, borderColor: 'rgba(2, 132, 199, 0.3)' }}
-                      onClick={() => navigate(`/record/${targetId}`)}
+                      onClick={() => navigate(`/records/${targetId}`)}
                       style={{ cursor: 'pointer', position: 'relative' }}
                     >
                       <div className="record-card-header">
@@ -536,8 +558,18 @@ export default function Dashboard() {
 
         {/* Active Access Grants Section */}
         <motion.div className="dashboard-section" variants={itemVariants}>
-          <div className="section-row">
-            <h2 className="section-heading">Active Access Grants</h2>
+          <div className="section-row" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <h2 className="section-heading" style={{ margin: 0 }}>Active Access Grants</h2>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => navigate('/grants')}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--color-primary)' }}
+              >
+                Manage All <ArrowRight size={14} />
+              </button>
+            </div>
             <span className="section-count">{activeGrants.length} active</span>
           </div>
 

@@ -1,0 +1,71 @@
+/* ============================================================
+   AccessGrantsPage Styles
+   ============================================================ */
+
+.grants-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.grants-filter-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.grants-countdown {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  color: var(--color-accent);
+  background: var(--color-accent-muted);
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+/* Create form */
+.grants-create-form {
+  padding: var(--space-6);
+  overflow: hidden;
+}
+
+.grants-create-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.grants-create-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.grants-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+}
+
+@media (max-width: 768px) {
+  .grants-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .grants-filter-group {
+    justify-content: space-between;
+  }
+
+  .grant-row-right {
+    flex-wrap: wrap;
+  }
+}

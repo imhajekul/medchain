@@ -4,7 +4,7 @@ import {
   Shield, Menu, X, LogOut, User, ChevronDown,
   LayoutDashboard, Upload, Stethoscope, Heart,
   Activity, FileText, Settings, HelpCircle, Bell, Home,
-  Moon, Sun, Bot, Wallet as WalletIcon, Sparkles
+  Moon, Sun, Bot, Wallet as WalletIcon, Sparkles, Key, Share2
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
@@ -56,14 +56,18 @@ export default function Navbar() {
     : isPatient
       ? [
           { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
-          { path: '/wallet', label: 'Wallet', icon: <WalletIcon size={16} /> },
+          { path: '/records', label: 'Records', icon: <FileText size={16} /> },
+          { path: '/records/upload', label: 'Upload', icon: <Upload size={16} /> },
+          { path: '/grants', label: 'Grants', icon: <Share2 size={16} /> },
+          { path: '/activity', label: 'Activity', icon: <Activity size={16} /> },
           { path: '/assistant', label: 'AI Copilot', icon: <Bot size={16} /> },
-          { path: '/upload', label: 'Upload', icon: <Upload size={16} /> },
+          { path: '/wallet', label: 'Wallet', icon: <WalletIcon size={16} /> },
         ]
       : [
           { path: '/doctor-access', label: 'Doctor Portal', icon: <FileText size={16} /> },
-          { path: '/wallet', label: 'Wallet', icon: <WalletIcon size={16} /> },
+          { path: '/activity', label: 'Activity', icon: <Activity size={16} /> },
           { path: '/assistant', label: 'AI Copilot', icon: <Bot size={16} /> },
+          { path: '/wallet', label: 'Wallet', icon: <WalletIcon size={16} /> },
         ];
 
   const handleDisconnect = () => {
@@ -201,26 +205,21 @@ export default function Navbar() {
                         <Link to="/wallet" className="navbar-dropdown-item" onClick={() => setProfileOpen(false)}>
                           <WalletIcon size={16} /> My Sovereign Wallet
                         </Link>
-                        <button
-                          type="button"
-                          className="navbar-dropdown-item"
-                          onClick={() => { setProfileOpen(false); setActivityModalOpen(true); }}
-                        >
+                        <Link to="/activity" className="navbar-dropdown-item" onClick={() => setProfileOpen(false)}>
                           <Activity size={16} /> Activity & Audit Log
-                        </button>
-                        <button
-                          type="button"
-                          className="navbar-dropdown-item"
-                          onClick={() => { setProfileOpen(false); setSettingsModalOpen(true); }}
-                        >
+                        </Link>
+                        <Link to="/security" className="navbar-dropdown-item" onClick={() => setProfileOpen(false)}>
+                          <Key size={16} /> Key Management & Security
+                        </Link>
+                        <Link to="/settings" className="navbar-dropdown-item" onClick={() => setProfileOpen(false)}>
                           <Settings size={16} /> Settings & Profile
-                        </button>
+                        </Link>
                         <button
                           type="button"
                           className="navbar-dropdown-item"
                           onClick={() => { setProfileOpen(false); setSupportModalOpen(true); }}
                         >
-                          <HelpCircle size={16} /> Help & Support
+                          <HelpCircle size={16} /> Help & Security Guide
                         </button>
                       </div>
 
@@ -331,26 +330,33 @@ export default function Navbar() {
 
             {isConnected && (
               <>
-                <button
-                  type="button"
+                <Link
+                  to="/activity"
                   className="navbar-mobile-link"
-                  onClick={() => { setMobileOpen(false); setActivityModalOpen(true); }}
+                  onClick={() => setMobileOpen(false)}
                 >
                   <Activity size={16} /> Activity & Audit Log
-                </button>
-                <button
-                  type="button"
+                </Link>
+                <Link
+                  to="/security"
                   className="navbar-mobile-link"
-                  onClick={() => { setMobileOpen(false); setSettingsModalOpen(true); }}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <Key size={16} /> Key Management & Security
+                </Link>
+                <Link
+                  to="/settings"
+                  className="navbar-mobile-link"
+                  onClick={() => setMobileOpen(false)}
                 >
                   <Settings size={16} /> Settings & Profile
-                </button>
+                </Link>
                 <button
                   type="button"
                   className="navbar-mobile-link"
                   onClick={() => { setMobileOpen(false); setSupportModalOpen(true); }}
                 >
-                  <HelpCircle size={16} /> Help & Support
+                  <HelpCircle size={16} /> Help & Security Guide
                 </button>
                 <div className="navbar-mobile-divider" />
                 <button className="navbar-mobile-link navbar-mobile-danger" onClick={handleDisconnect}>

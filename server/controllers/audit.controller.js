@@ -55,3 +55,43 @@ export async function getAuditTrail(req, res) {
     return res.status(500).json({ error: 'Failed to fetch audit events', details: err.message });
   }
 }
+
+/**
+ * GET /audit (or /api/audit)
+ * Auth: Scoped to authenticated user session.
+ * Response: { events: [{ id, eventType, actorWallet, recordId, context, timestamp, txHash }] }
+ */
+export async function getUserAuditLogs(req, res) {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: 'Authentication Required: Missing session token.' });
+    }
+
+    const wallet = user.walletAddress ? user.walletAddress.toLowerCase() : null;
+    const result = await db.query(
+      `SELECT action_type as "eventType", actor_address as "actorWallet",
+              block_timestamp as "timestamp", tx_hash as "txHash",
+              record_id_hex as "recordId", context
+       FROM audit_logs
+       ORDER BY block_timestamp DESC`,
+      [wallet]
+    );
+
+    return res.status(200).json({
+      events: (result.rows || []).map(row => ({
+        id: row.id || `${row.txHash || 'tx'}_${row.timestamp || Date.now()}`,
+        eventType: row.eventType || 'SECURITY_AUDIT',
+        actorWallet: row.actorWallet,
+        recordId: row.recordId,
+        context: row.context,
+        timestamp: row.timestamp,
+        txHash: row.txHash
+      }))
+    });
+  } catch (err) {
+    console.error('[Get User Audit Logs Error]:', err);
+    return res.status(500).json({ error: 'Failed to fetch audit events', details: err.message });
+  }
+}
+

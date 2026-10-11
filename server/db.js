@@ -323,6 +323,34 @@ class MongoDatabase {
       return { rows: formatted, rowCount: formatted.length };
     }
 
+    // 9b. Select All Audit Logs for User
+    if (q.includes('FROM audit_logs') && !q.includes('record_id_hex = $1')) {
+      let filter = {};
+      if (params.length > 0 && params[0]) {
+        const wallet = String(params[0]).toLowerCase();
+        const userRecs = await this.records.find({ owner_address: wallet }).toArray();
+        const userRecIds = userRecs.map(r => r.record_id_hex);
+        filter = {
+          $or: [
+            { actor_address: wallet },
+            { record_id_hex: { $in: userRecIds } }
+          ]
+        };
+      }
+      const logs = await this.audit_logs.find(filter).sort({ block_timestamp: -1, created_at: -1 }).limit(100).toArray();
+      const formatted = logs.map(a => ({
+        id: a.id || a._id,
+        recordId: a.record_id_hex,
+        actorWallet: a.actor_address,
+        eventType: a.action_type,
+        context: a.context,
+        blockNumber: a.block_number,
+        txHash: String(a.tx_hash || ''),
+        timestamp: a.block_timestamp || a.created_at || new Date()
+      }));
+      return { rows: formatted, rowCount: formatted.length };
+    }
+
     // 10. Select Indexer State
     if (q.includes('FROM indexer_state WHERE network = $1')) {
       const net = params[0];
@@ -652,6 +680,27 @@ class MemoryDatabase {
           txHash: String(a.tx_hash || ''),
           timestamp: a.block_timestamp
         }));
+      return { rows: logs, rowCount: logs.length };
+    }
+
+    // 9b. Select All Audit Logs for User
+    if (q.includes('FROM audit_logs') && !q.includes('record_id_hex = $1')) {
+      let filtered = this.audit_logs;
+      if (params.length > 0 && params[0]) {
+        const wallet = String(params[0]).toLowerCase();
+        const userRecIds = this.records.filter(r => r.owner_address.toLowerCase() === wallet).map(r => r.record_id_hex);
+        filtered = this.audit_logs.filter(a => (a.actor_address && a.actor_address.toLowerCase() === wallet) || userRecIds.includes(a.record_id_hex));
+      }
+      const logs = filtered.map(a => ({
+        id: a.id,
+        recordId: a.record_id_hex,
+        actorWallet: a.actor_address,
+        eventType: a.action_type,
+        context: a.context,
+        blockNumber: a.block_number,
+        txHash: String(a.tx_hash || ''),
+        timestamp: a.block_timestamp || new Date()
+      }));
       return { rows: logs, rowCount: logs.length };
     }
 
