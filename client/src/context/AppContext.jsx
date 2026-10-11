@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { ethers } from 'ethers';
-import { mockPatient, mockDoctor, mockRecords, mockGrants, mockAuditEvents, mockStats } from '../data/mockData';
 import { api } from '../services/api';
+import { authenticateWithGoogle } from '../services/firebase';
 import { encryptFileClientSide, decryptFileClientSide } from '../crypto/aes';
 
 const AppContext = createContext(null);
@@ -10,10 +10,16 @@ const AUTH_STORAGE_KEY = 'medvault_auth';
 export function AppProvider({ children }) {
   const [isConnected, setIsConnected] = useState(false);
   const [user, setUser] = useState(null);
-  const [records, setRecords] = useState(mockRecords);
-  const [grants, setGrants] = useState(mockGrants);
-  const [auditEvents, setAuditEvents] = useState(mockAuditEvents);
-  const [stats, setStats] = useState(mockStats);
+  const [records, setRecords] = useState([]);
+  const [grants, setGrants] = useState([]);
+  const [auditEvents, setAuditEvents] = useState([]);
+  const [stats, setStats] = useState({
+    totalRecords: 0,
+    activeGrants: 0,
+    expiredGrants: 0,
+    totalAccesses: 0,
+    storageUsed: '0 KB'
+  });
   const [loading, setLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [toasts, setToasts] = useState([]);
@@ -46,11 +52,18 @@ export function AppProvider({ children }) {
   const refreshRecords = useCallback(async () => {
     try {
       const data = await api.getRecords();
-      if (data && data.records && data.records.length > 0) {
+      if (data && data.records) {
         setRecords(data.records);
+        setStats(prev => ({
+          ...prev,
+          totalRecords: data.records.length,
+          activeGrants: data.records.reduce((acc, r) => acc + (r.activeGrants || 0), 0)
+        }));
+      } else {
+        setRecords([]);
       }
     } catch (e) {
-      // Keep existing records on fallback
+      setRecords([]);
     }
   }, []);
 
@@ -152,15 +165,8 @@ export function AppProvider({ children }) {
       return userData;
     } catch (err) {
       console.error('[Sign-In Error]:', err);
-      // Fallback for seamless demo
-      const fallbackUser = role === 'patient' ? { ...mockPatient } : { ...mockDoctor };
-      fallbackUser.role = role;
-      fallbackUser.sessionToken = `mock_session_${Date.now()}`;
-      setIsConnected(true);
-      setUser(fallbackUser);
-      persistSession(fallbackUser);
-      addToast(`Connected with session fallback (${err.message})`, 'info');
-      return fallbackUser;
+      addToast(err.message || 'Authentication failed', 'error');
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -228,6 +234,47 @@ export function AppProvider({ children }) {
   const signUp = useCallback(async ({ displayName, email, role, walletAddress }) => {
     return signIn({ walletAddress, role });
   }, [signIn]);
+
+  const signInWithGoogle = useCallback(async (role = 'patient') => {
+    setLoading(true);
+    try {
+      const googleData = await authenticateWithGoogle();
+      const res = await api.googleAuth({
+        email: googleData.email,
+        name: googleData.name,
+        photoURL: googleData.photoURL,
+        idToken: googleData.idToken,
+        uid: googleData.googleId,
+        role: role
+      }, role);
+
+      const roleStr = String(res.user?.role || role).toLowerCase();
+      const userData = {
+        id: res.user?.id || `user_${Date.now()}`,
+        name: res.user?.name || googleData.name,
+        displayName: res.user?.name || googleData.name,
+        email: res.user?.email || googleData.email,
+        photoURL: googleData.photoURL || null,
+        walletAddress: res.user?.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92',
+        role: roleStr,
+        sessionToken: res.sessionToken,
+        authType: 'google'
+      };
+
+      setUser(userData);
+      setIsConnected(true);
+      persistSession(userData);
+      addToast(`Signed in with Google as ${roleStr === 'doctor' ? 'Healthcare Provider' : 'Patient'}!`, 'success');
+      await refreshRecords();
+      return userData;
+    } catch (err) {
+      console.error('[Google Sign-In Error]:', err);
+      addToast(err.message || 'Google sign-in failed', 'error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [addToast, refreshRecords]);
 
   const connectWallet = useCallback(async (role = 'patient') => {
     return signIn({ role });
@@ -433,6 +480,7 @@ export function AppProvider({ children }) {
       signIn,
       loginWithEmail,
       registerWithEmail,
+      signInWithGoogle,
       connectWallet,
       disconnectWallet,
       uploadRecord,

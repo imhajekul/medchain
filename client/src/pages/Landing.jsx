@@ -7,7 +7,7 @@ export default function Landing() {
   const navigate = useNavigate();
 
   const handleConnect = () => {
-    navigate('/auth');
+    navigate('/auth?mode=register&role=patient');
   };
 
   const features = [
@@ -107,7 +107,7 @@ export default function Landing() {
               </motion.button>
               <motion.button
                 className="btn btn-secondary btn-lg"
-                onClick={() => navigate('/auth')}
+                onClick={() => navigate('/auth?mode=signin&role=doctor')}
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.98 }}
               >

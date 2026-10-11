@@ -33,108 +33,17 @@ if (process.env.DATABASE_URL) {
  */
 class MemoryDatabase {
   constructor() {
-    this.users = [
-      {
-        id: 'usr_patient_demo',
-        email: 'patient@medvault.io',
-        password_hash: '6ffa44c702f22e5fac081cd68906a68cc2a790e59879ab6536b0cf03a1db5c95b3789f39d7209547b2864401651a0b28ac50e2c5fdeac0bb07ebe3887447c229',
-        salt: 'medvaultdemosalt',
-        role: 'PATIENT',
-        wallet_address: '0x7a3b68f123456789abcdef0123456789abcdef92',
-        name: 'Alice Patient (Demo)',
-        created_at: new Date('2026-09-01T00:00:00Z')
-      },
-      {
-        id: 'usr_doctor_demo',
-        email: 'doctor@medvault.io',
-        password_hash: '6ffa44c702f22e5fac081cd68906a68cc2a790e59879ab6536b0cf03a1db5c95b3789f39d7209547b2864401651a0b28ac50e2c5fdeac0bb07ebe3887447c229',
-        salt: 'medvaultdemosalt',
-        role: 'DOCTOR',
-        wallet_address: '0x4e2fa81c123456789abcdef0123456789abcdef1c',
-        name: 'Dr. Sarah Smith (Demo)',
-        created_at: new Date('2026-09-01T00:00:00Z')
-      }
-    ];
-
-    this.records = [
-      {
-        id: 'rec_001',
-        record_id_hex: '0x1000000000000000000000000000000000000000000000000000000000000001',
-        owner_address: '0x7a3b68f123456789abcdef0123456789abcdef92',
-        label: 'Complete Blood Count — Sept 2026',
-        ipfs_cid: 'QmX7b2c9f3a1234567890abcdef9f3a',
-        content_hash: '0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b',
-        file_size_bytes: 250880,
-        mime_type: 'application/pdf',
-        on_chain_tx_hash: '0xabc123456789def0123456789abcdef0123456789abcdef0123456789abcdef',
-        created_at: new Date('2026-09-15T14:30:00Z')
-      }
-    ];
-
-    this.encrypted_key_bundles = [
-      {
-        id: 'bundle_001',
-        record_id_hex: '0x1000000000000000000000000000000000000000000000000000000000000001',
-        recipient_address: '0x7a3b68f123456789abcdef0123456789abcdef92',
-        encrypted_key_material: 'eyJlbmNEZWsiOiAiQUVTLURFSwiLCJpdiI6ICJYWVoifQ==',
-        key_algorithm: 'ECIES-secp256k1',
-        created_at: new Date('2026-09-15T14:30:00Z')
-      },
-      {
-        id: 'bundle_002',
-        record_id_hex: '0x1000000000000000000000000000000000000000000000000000000000000001',
-        recipient_address: '0x4e2fa81c123456789abcdef0123456789abcdef1c',
-        encrypted_key_material: 'eyJkb2N0b3JFbmNEZWsiOiAiRE9DVE9SLURFSwiLCJpdiI6ICJYWVoifQ==',
-        key_algorithm: 'ECIES-secp256k1',
-        created_at: new Date('2026-09-25T10:00:00Z')
-      }
-    ];
-
-    this.access_grants = [
-      {
-        id: 'grant_001',
-        grant_id_hex: '0x2000000000000000000000000000000000000000000000000000000000000001',
-        record_id_hex: '0x1000000000000000000000000000000000000000000000000000000000000001',
-        owner_address: '0x7a3b68f123456789abcdef0123456789abcdef92',
-        grantee_address: '0x4e2fa81c123456789abcdef0123456789abcdef1c',
-        valid_from: new Date(Date.now() - 3600 * 1000),
-        valid_to: new Date(Date.now() + 24 * 3600 * 1000), // Active for 24h
-        is_revoked: false,
-        tx_hash: '0xdef456123456789abcdef0123456789abcdef0123456789abcdef0123456789',
-        created_at: new Date('2026-09-25T10:00:00Z')
-      }
-    ];
-
-    this.audit_logs = [
-      {
-        id: 'audit_001',
-        record_id_hex: '0x1000000000000000000000000000000000000000000000000000000000000001',
-        actor_address: '0x7a3b68f123456789abcdef0123456789abcdef92',
-        action_type: 'RECORD_REGISTERED',
-        context: 'IPFS: QmX7b2c9f3a1234567890abcdef9f3a',
-        block_number: 14205012,
-        tx_hash: '0xabc123456789def0123456789abcdef0123456789abcdef0123456789abcdef',
-        log_index: 0,
-        block_timestamp: new Date('2026-09-15T14:30:00Z')
-      },
-      {
-        id: 'audit_002',
-        record_id_hex: '0x1000000000000000000000000000000000000000000000000000000000000001',
-        actor_address: '0x7a3b68f123456789abcdef0123456789abcdef92',
-        action_type: 'ACCESS_GRANTED',
-        context: 'Doctor: 0x4e2fa81c123456789abcdef0123456789abcdef1c',
-        block_number: 14221045,
-        tx_hash: '0xdef456123456789abcdef0123456789abcdef0123456789abcdef0123456789',
-        log_index: 1,
-        block_timestamp: new Date('2026-09-25T10:00:00Z')
-      }
-    ];
+    this.users = [];
+    this.records = [];
+    this.encrypted_key_bundles = [];
+    this.access_grants = [];
+    this.audit_logs = [];
 
     this.indexer_state = new Map([
       ['polygon-amoy', { last_indexed_block: 14221045, updated_at: new Date() }]
     ]);
 
-    console.log('💾 Running MedVault in-memory storage driver (Postgres fallback).');
+    console.log('💾 Running MedVault in-memory storage driver (clean production state).');
   }
 
   async query(text, params = []) {

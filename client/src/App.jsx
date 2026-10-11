@@ -32,19 +32,22 @@ function PageTransition({ children }) {
   );
 }
 
-// Protected route — redirects to /auth if not signed in
-function ProtectedRoute({ children }) {
-  const { isConnected, authLoading } = useApp();
+// Protected route — redirects to /auth if not signed in, and ensures Doctor vs Patient separation
+function PatientRoute({ children }) {
+  const { isConnected, authLoading, user } = useApp();
   if (authLoading) return null; // wait for session restore
-  if (!isConnected) return <Navigate to="/auth" replace />;
+  if (!isConnected) return <Navigate to="/auth?mode=signin&role=patient" replace />;
+  if (user?.role === 'doctor') return <Navigate to="/doctor-access" replace />;
   return children;
 }
 
-// Guest-only route — redirects to /dashboard if already signed in
+// Guest-only route — redirects to appropriate role portal if already signed in
 function GuestRoute({ children }) {
-  const { isConnected, authLoading } = useApp();
+  const { isConnected, authLoading, user } = useApp();
   if (authLoading) return null;
-  if (isConnected) return <Navigate to="/dashboard" replace />;
+  if (isConnected) {
+    return <Navigate to={user?.role === 'doctor' ? '/doctor-access' : '/dashboard'} replace />;
+  }
   return children;
 }
 
@@ -64,19 +67,19 @@ function AnimatedRoutes() {
           </GuestRoute>
         } />
         <Route path="/dashboard" element={
-          <ProtectedRoute>
+          <PatientRoute>
             <PageTransition><Dashboard /></PageTransition>
-          </ProtectedRoute>
+          </PatientRoute>
         } />
         <Route path="/upload" element={
-          <ProtectedRoute>
+          <PatientRoute>
             <PageTransition><UploadRecord /></PageTransition>
-          </ProtectedRoute>
+          </PatientRoute>
         } />
         <Route path="/record/:id" element={
-          <ProtectedRoute>
+          <PatientRoute>
             <PageTransition><RecordDetail /></PageTransition>
-          </ProtectedRoute>
+          </PatientRoute>
         } />
         <Route path="/doctor-access" element={
           <PageTransition><DoctorAccess /></PageTransition>

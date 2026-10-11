@@ -134,15 +134,21 @@ async function runApiSpecTests() {
   if (badLoginRes.status !== 401) throw new Error('Expected 401 Unauthorized on wrong password');
   console.log('   ✅ Security Enforced: Incorrect password rejected with HTTP 401.');
 
-  // 5. Test Demo Seed Account Login (patient@medvault.io)
-  const demoLoginRes = await fetch(`${BASE_URL}/auth/login`, {
+  // 5. Test Google OAuth Registration & Login (POST /auth/google)
+  const googleAuthRes = await fetch(`${BASE_URL}/auth/google`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'patient@medvault.io', password: 'Password123!' })
+    body: JSON.stringify({
+      email: 'oauth.evaluator@medvault.test',
+      name: 'Dr. Evaluator',
+      role: 'DOCTOR'
+    })
   });
-  const demoLoginData = await demoLoginRes.json();
-  if (demoLoginRes.status !== 200) throw new Error('Demo account login failed');
-  console.log(`   ✅ Demo Account Verified: patient@medvault.io logged in as ${demoLoginData.user.role}.\n`);
+  const googleAuthData = await googleAuthRes.json();
+  if (googleAuthRes.status !== 200 || !googleAuthData.sessionToken) {
+    throw new Error('Google OAuth endpoint test failed: ' + JSON.stringify(googleAuthData));
+  }
+  console.log(`   ✅ Google OAuth Verified: ${googleAuthData.user.email} authenticated as ${googleAuthData.user.role}.\n`);
 
   // ===========================================================================
   // Step 4: Storage & Record Management APIs (POST /records, GET /records/:id)

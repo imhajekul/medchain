@@ -7,7 +7,6 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useCountdown, formatDate, formatDateTime, formatRelativeTime } from '../hooks/useHelpers';
-import { expiryPresets } from '../data/mockData';
 import './RecordDetail.css';
 
 const itemVariants = {

@@ -58,6 +58,19 @@ export const api = {
     return data;
   },
 
+  async googleAuth(googleData, role = 'patient') {
+    const res = await fetch(`${API_BASE}/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...googleData, role })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || 'Google authentication failed');
+    }
+    return data;
+  },
+
   // --- Step 2: Web3 Authentication ---
   async getNonce() {
     const res = await fetch(`${API_BASE}/auth/nonce`);

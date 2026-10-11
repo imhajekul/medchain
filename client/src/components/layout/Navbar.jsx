@@ -180,9 +180,15 @@ export default function Navbar() {
                       <div className="navbar-dropdown-divider" />
 
                       <div className="navbar-dropdown-section">
-                        <Link to="/dashboard" className="navbar-dropdown-item" onClick={() => setProfileOpen(false)}>
-                          <LayoutDashboard size={16} /> Dashboard
-                        </Link>
+                        {isPatient ? (
+                          <Link to="/dashboard" className="navbar-dropdown-item" onClick={() => setProfileOpen(false)}>
+                            <LayoutDashboard size={16} /> Patient Dashboard
+                          </Link>
+                        ) : (
+                          <Link to="/doctor-access" className="navbar-dropdown-item" onClick={() => setProfileOpen(false)}>
+                            <FileText size={16} /> Doctor Portal
+                          </Link>
+                        )}
                         <button className="navbar-dropdown-item">
                           <Activity size={16} /> Activity
                         </button>
@@ -208,7 +214,7 @@ export default function Navbar() {
             </>
           ) : (
             <div className="navbar-auth-buttons">
-              <Link to="/auth">
+              <Link to="/auth?mode=signin">
                 <motion.button
                   className="btn btn-ghost btn-sm"
                   whileHover={{ scale: 1.03 }}
@@ -217,13 +223,13 @@ export default function Navbar() {
                   Sign In
                 </motion.button>
               </Link>
-              <Link to="/auth">
+              <Link to="/auth?mode=register">
                 <motion.button
                   className="btn btn-primary btn-sm"
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}
                 >
-                  Get Started
+                  Register
                 </motion.button>
               </Link>
             </div>
@@ -287,6 +293,26 @@ export default function Navbar() {
                 {link.label}
               </Link>
             ))}
+
+            {!isConnected && (
+              <>
+                <Link
+                  to="/auth?mode=signin"
+                  className="navbar-mobile-link"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <User size={16} /> Sign In
+                </Link>
+                <Link
+                  to="/auth?mode=register"
+                  className="navbar-mobile-link"
+                  style={{ color: 'var(--color-accent)', fontWeight: '600' }}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <Shield size={16} /> Create Account / Register
+                </Link>
+              </>
+            )}
 
             <div className="navbar-mobile-divider" />
 

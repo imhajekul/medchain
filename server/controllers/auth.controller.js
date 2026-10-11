@@ -197,3 +197,72 @@ export async function connectWallet(req, res) {
 export function getMe(req, res) {
   return res.status(200).json({ user: req.user });
 }
+
+/**
+ * POST /auth/google
+ * Google OAuth Sign-In & Registration Endpoint.
+ * Inputs: { email, name?, role?, googleId?, idToken? }
+ * Outputs: { sessionToken, user: { id, email, walletAddress, role, name } }
+ */
+export async function googleAuth(req, res) {
+  try {
+    const { email, name, role } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Missing email from Google authentication.' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const assignedRole = String(role || 'PATIENT').toUpperCase() === 'DOCTOR' ? 'DOCTOR' : 'PATIENT';
+
+    // 1. Check if user already exists
+    let result = await db.query('SELECT * FROM users WHERE email = $1', [normalizedEmail]);
+    let user;
+
+    if (result.rows.length > 0) {
+      user = result.rows[0];
+    } else {
+      // 2. Auto-register Google user
+      const sovereignWallet = ethers.Wallet.createRandom().address.toLowerCase();
+      const userId = `usr_g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const displayName = name ? String(name).trim() : (assignedRole === 'DOCTOR' ? 'Dr. Google User' : 'Google Patient');
+      const dummySalt = crypto.randomBytes(16).toString('hex');
+      const dummyHash = crypto.randomBytes(32).toString('hex');
+
+      await db.query(
+        `INSERT INTO users (id, email, password_hash, salt, role, wallet_address, name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [userId, normalizedEmail, dummyHash, dummySalt, assignedRole, sovereignWallet, displayName]
+      );
+
+      user = {
+        id: userId,
+        email: normalizedEmail,
+        wallet_address: sovereignWallet,
+        role: assignedRole,
+        name: displayName
+      };
+    }
+
+    const userPayload = {
+      id: user.id,
+      email: user.email,
+      walletAddress: user.wallet_address,
+      role: user.role,
+      name: user.name || (user.role === 'DOCTOR' ? 'Dr. Healthcare Provider' : 'MedVault Patient')
+    };
+
+    const sessionToken = issueSessionToken(userPayload);
+
+    return res.status(200).json({
+      sessionToken,
+      user: userPayload,
+      role: user.role,
+      walletAddress: user.wallet_address,
+      message: 'Google authentication successful.'
+    });
+  } catch (error) {
+    console.error('[Google Auth Error]:', error.message);
+    return res.status(500).json({ error: 'Internal server error during Google authentication.' });
+  }
+}
