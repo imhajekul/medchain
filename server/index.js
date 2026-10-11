@@ -22,12 +22,14 @@ import {
 } from './controllers/records.controller.js';
 import {
   createGrant,
+  listGrants,
   getGrantStatus,
   getDecryptionKey,
   revokeGrantEarly
 } from './controllers/grants.controller.js';
 import { getAuditTrail } from './controllers/audit.controller.js';
 import { retrieveRecordForDoctor } from './controllers/access.controller.js';
+import { handleAiChat } from './controllers/ai.controller.js';
 import { indexer } from './services/indexer.service.js';
 
 const app = express();
@@ -135,15 +137,15 @@ app.post(['/auth/register', '/api/auth/register'], authLimiter, registerUser);
 app.post(['/auth/login', '/api/auth/login'], authLimiter, loginUser);
 app.post(['/auth/google', '/api/auth/google'], authLimiter, googleAuth);
 app.get(['/auth/nonce', '/api/auth/nonce'], authLimiter, getNonce);
-app.post(['/auth/connect', '/api/auth/connect'], authLimiter, connectWallet);
+app.post(['/auth/connect', '/api/auth/connect', '/auth/verify', '/api/auth/verify'], authLimiter, connectWallet);
 app.get(['/auth/me', '/api/auth/me'], requireAuth, getMe);
 
 // ─── Step 4: Storage & Record Management APIs ─────────────────
 // Conforms to 03-API-SPEC.md:
-// POST /records -> { recordId, storageCID }
+// POST /records (and /records/upload) -> { recordId, storageCID }
 // GET /records/:id -> { recordId, label, storageCID, createdAt, activeGrants }
 app.post(
-  ['/records', '/api/records'],
+  ['/records', '/api/records', '/records/upload', '/api/records/upload'],
   requireAuth,
   uploadLimiter,
   upload.single('encryptedFile'),
@@ -155,10 +157,12 @@ app.get(['/records/:id', '/api/records/:id'], requireAuth, getRecordById);
 
 // ─── Step 5: Time-Boxed Grants & Access Verification ──────────
 // Conforms to 03-API-SPEC.md:
+// GET /grants -> { grants: [...] }
 // POST /grants -> { grantId, expiresAt, shareableLink }
 // GET /grants/:id -> { grantId, status, expiresAt }
 // GET /grants/:id/decrypt-key -> { encryptedKeyMaterial }
 // DELETE /grants/:id -> { grantId, status: "revoked" }
+app.get(['/grants', '/api/grants'], requireAuth, listGrants);
 app.post(['/grants', '/api/grants'], requireAuth, createGrant);
 app.get(['/grants/:id', '/api/grants/:id'], getGrantStatus);
 app.get(['/grants/:id/decrypt-key', '/api/grants/:id/decrypt-key'], requireAuth, getDecryptionKey);
@@ -171,6 +175,19 @@ app.get(['/audit/:recordId', '/api/audit/:recordId'], requireAuth, getAuditTrail
 
 // ─── Step 5 Extended Flow: Full Decryption Stream for Doctors ─
 app.get(['/records/:id/retrieve', '/api/records/:id/retrieve'], requireAuth, retrieveRecordForDoctor);
+
+// ─── AI Health Assistant & Clinical Copilot ──────────────────
+app.post(['/ai/chat', '/api/ai/chat'], handleAiChat);
+
+// ─── Database Inspection & Live Cluster State Explorer ───────
+app.get(['/admin/db-inspect', '/api/admin/db-inspect', '/db/inspect', '/api/db/inspect'], async (req, res) => {
+  try {
+    const inspection = await db.inspectDatabase();
+    res.json(inspection);
+  } catch (err) {
+    res.status(500).json({ error: 'Database inspection failed', details: err.message });
+  }
+});
 
 // ─── Stats Route ──────────────────────────────────────────────
 app.get('/api/stats', (req, res) => {
@@ -194,6 +211,9 @@ if (fs.existsSync(clientDist)) {
       req.path.startsWith('/records') ||
       req.path.startsWith('/grants') ||
       req.path.startsWith('/audit') ||
+      req.path.startsWith('/ai') ||
+      req.path.startsWith('/admin') ||
+      req.path.startsWith('/db') ||
       req.path.startsWith('/health') ||
       req.path.startsWith('/ready')
     ) {

@@ -9,7 +9,7 @@ function resolveApiBase() {
     const trimmed = envUrl.replace(/\/+$/, '');
     return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
   }
-  if (window.location.port === '5173') {
+  if (typeof window !== 'undefined' && window.location.port === '5173') {
     return 'http://localhost:3001/api';
   }
   return '/api';
@@ -17,17 +17,65 @@ function resolveApiBase() {
 
 const API_BASE = resolveApiBase();
 
-function getAuthHeaders() {
+export function getAuthHeaders() {
   const saved = localStorage.getItem('medvault_auth');
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
-      if (parsed.sessionToken) {
-        return { Authorization: `Bearer ${parsed.sessionToken}` };
+      const token = parsed.sessionToken || parsed.token;
+      if (token) {
+        return { Authorization: `Bearer ${token}` };
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[API Auth Error] Could not read sessionToken from localStorage:', e);
+    }
   }
+
+  // Fallback: check document.cookie for medvault_token
+  if (typeof document !== 'undefined' && document.cookie) {
+    const match = document.cookie.match(/(?:^|;\s*)medvault_token=([^;]+)/);
+    if (match && match[1]) {
+      return { Authorization: `Bearer ${decodeURIComponent(match[1])}` };
+    }
+  }
+
   return {};
+}
+
+async function handleApiResponse(res, defaultErrorMsg) {
+  if (res.ok) {
+    return await res.json().catch(() => ({}));
+  }
+
+  let errData = {};
+  try {
+    errData = await res.json();
+  } catch {}
+
+  const errorMessage = errData.error || errData.message || defaultErrorMsg || `Server returned error (${res.status})`;
+
+  if (res.status === 401) {
+    console.warn('[API 401 Unauthorized]:', errorMessage);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('medvault:unauthorized', { detail: { message: errorMessage } }));
+    }
+    throw new Error(errorMessage || 'Session expired or unauthenticated. Please sign in again.');
+  }
+
+  if (res.status === 403) {
+    console.warn('[API 403 Forbidden]:', errorMessage);
+    throw new Error(errorMessage || 'Permission denied: caller is not authorized for this resource.');
+  }
+
+  if (res.status === 404) {
+    throw new Error(errorMessage || 'Requested resource was not found on the server.');
+  }
+
+  if (res.status === 410) {
+    throw new Error(errorMessage || 'Access grant has expired.');
+  }
+
+  throw new Error(errorMessage);
 }
 
 export const api = {
@@ -38,11 +86,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, role, name })
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || 'Registration failed');
-    }
-    return data;
+    return handleApiResponse(res, 'Registration failed');
   },
 
   async login(email, password) {
@@ -51,11 +95,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || 'Invalid email or password');
-    }
-    return data;
+    return handleApiResponse(res, 'Invalid email or password');
   },
 
   async googleAuth(googleData, role = 'patient') {
@@ -64,11 +104,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...googleData, role })
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || 'Google authentication failed');
-    }
-    return data;
+    return handleApiResponse(res, 'Google authentication failed');
   },
 
   async firebaseAuth(firebaseData, role = 'patient') {
@@ -76,64 +112,89 @@ export const api = {
   },
 
   // --- Step 2: Web3 Authentication ---
-  async getNonce() {
-    const res = await fetch(`${API_BASE}/auth/nonce`);
-    if (!res.ok) throw new Error('Failed to fetch authentication nonce');
-    return await res.json();
+  async getNonce(walletAddress = null) {
+    const query = walletAddress ? `?address=${encodeURIComponent(walletAddress)}` : '';
+    const res = await fetch(`${API_BASE}/auth/nonce${query}`);
+    return handleApiResponse(res, 'Failed to fetch authentication nonce');
   },
 
-  async verifySignature(message, signature, role = 'patient') {
-    const res = await fetch(`${API_BASE}/auth/verify`, {
+  async verifySignature(message, signature, role = 'patient', walletAddress = null, nonce = null) {
+    // Attempt /auth/connect first, with fallback to /auth/verify
+    const payload = {
+      message,
+      signature,
+      role,
+      walletAddress: walletAddress || undefined,
+      nonce: nonce || undefined
+    };
+
+    let res = await fetch(`${API_BASE}/auth/connect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, signature, role })
+      body: JSON.stringify(payload)
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Signature verification failed');
+
+    if (res.status === 404) {
+      res = await fetch(`${API_BASE}/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
     }
-    return await res.json();
+
+    return handleApiResponse(res, 'Cryptographic wallet signature verification failed');
   },
 
   // --- Step 3: Encrypted Records ---
   async uploadRecord(recordIdHex, label, mimeType, encryptedBlob, rawKeyBase64) {
     const formData = new FormData();
+    formData.append('recordId', recordIdHex);
     formData.append('recordIdHex', recordIdHex);
     formData.append('label', label);
     formData.append('mimeType', mimeType);
     formData.append('encryptedKeyMaterial', rawKeyBase64);
     formData.append('encryptedFile', encryptedBlob, `${label}.enc`);
 
-    const res = await fetch(`${API_BASE}/records/upload`, {
+    // Resilient endpoint fallback: try /records/upload, fallback to /records
+    let res = await fetch(`${API_BASE}/records/upload`, {
       method: 'POST',
       headers: { ...getAuthHeaders() },
       body: formData
     });
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to upload encrypted record');
+    if (res.status === 404) {
+      res = await fetch(`${API_BASE}/records`, {
+        method: 'POST',
+        headers: { ...getAuthHeaders() },
+        body: formData
+      });
     }
-    return await res.json();
+
+    return handleApiResponse(res, 'Failed to upload encrypted record to storage');
   },
 
   async getRecords() {
     const res = await fetch(`${API_BASE}/records`, {
       headers: { ...getAuthHeaders() }
     });
-    if (!res.ok) throw new Error('Failed to fetch records');
-    return await res.json();
+    return handleApiResponse(res, 'Failed to retrieve records');
   },
 
   async getRecordById(id) {
     const res = await fetch(`${API_BASE}/records/${id}`, {
       headers: { ...getAuthHeaders() }
     });
-    if (!res.ok) throw new Error('Record not found');
-    return await res.json();
+    return handleApiResponse(res, 'Record not found or access denied');
   },
 
   // --- Step 1 & 3: Time-Boxed Grants ---
+  async getGrants() {
+    const res = await fetch(`${API_BASE}/grants`, {
+      headers: { ...getAuthHeaders() }
+    });
+    return handleApiResponse(res, 'Failed to retrieve active grants');
+  },
+
   async createGrant(recordIdHex, doctorAddress, expiresInSeconds, encryptedKeyForDoctor) {
     const res = await fetch(`${API_BASE}/grants`, {
       method: 'POST',
@@ -142,17 +203,24 @@ export const api = {
         ...getAuthHeaders()
       },
       body: JSON.stringify({
+        recordId: recordIdHex,
         recordIdHex,
+        granteeWallet: doctorAddress,
         doctorAddress,
         expiresInSeconds,
+        encryptedKeyMaterial: encryptedKeyForDoctor,
         encryptedKeyForDoctor
       })
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to create access grant');
-    }
-    return await res.json();
+    return handleApiResponse(res, 'Failed to create access grant');
+  },
+
+  async revokeGrant(grantId) {
+    const res = await fetch(`${API_BASE}/grants/${grantId}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeaders() }
+    });
+    return handleApiResponse(res, 'Failed to revoke access grant');
   },
 
   // --- Step 4: Immutable Audit Trail ---
@@ -160,8 +228,7 @@ export const api = {
     const res = await fetch(`${API_BASE}/audit/${recordIdHex}`, {
       headers: { ...getAuthHeaders() }
     });
-    if (!res.ok) throw new Error('Failed to fetch audit trail');
-    return await res.json();
+    return handleApiResponse(res, 'Failed to fetch audit trail');
   },
 
   // --- Step 5: Secure Doctor Retrieval ---
@@ -169,10 +236,25 @@ export const api = {
     const res = await fetch(`${API_BASE}/records/${recordIdHex}/retrieve`, {
       headers: { ...getAuthHeaders() }
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || 'Access denied or grant expired');
-    }
-    return await res.json();
+    return handleApiResponse(res, 'Access denied or grant expired');
+  },
+
+  // --- Step 6: AI Health Assistant & Clinical Copilot ---
+  async aiChat(message, history = [], context = {}) {
+    const res = await fetch(`${API_BASE}/ai/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({ message, history, context })
+    });
+    return handleApiResponse(res, 'AI assistant unavailable');
+  },
+
+  // --- Step 7: Live Database Cluster Inspector ---
+  async inspectDatabase() {
+    const res = await fetch(`${API_BASE}/admin/db-inspect`);
+    return handleApiResponse(res, 'Failed to inspect database');
   }
 };

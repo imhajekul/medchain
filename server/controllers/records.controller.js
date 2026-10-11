@@ -50,34 +50,39 @@ export async function uploadRecord(req, res) {
     // Persist ciphertext blob directly to IPFS pinning service
     const { cid, contentHash, sizeBytes } = await StorageService.saveEncryptedBlob(file.buffer);
 
-    // Generate unique record identifier
-    const recordId = `rec_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    // Generate or use supplied record identifier
+    const recordId = req.body.recordId || req.body.recordIdHex || `rec_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
     // Persist record metadata in database
     await db.query(
       `INSERT INTO records (record_id_hex, owner_address, label, ipfs_cid, content_hash, file_size_bytes, mime_type)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [recordId, user.walletAddress, label, cid, contentHash, sizeBytes, file.mimetype || 'application/octet-stream']
+      [recordId, user.walletAddress.toLowerCase(), label, cid, contentHash, sizeBytes, file.mimetype || 'application/octet-stream']
     );
 
     // Save patient's encrypted key envelope
     await db.query(
       `INSERT INTO encrypted_key_bundles (record_id_hex, recipient_address, encrypted_key_material, key_algorithm)
        VALUES ($1, $2, $3, $4)`,
-      [recordId, user.walletAddress, encryptedKeyMaterial, 'ECIES-secp256k1']
+      [recordId, user.walletAddress.toLowerCase(), encryptedKeyMaterial, 'ECIES-secp256k1']
     );
 
     // Record initial registration in audit trail
     await db.query(
       `INSERT INTO audit_logs (record_id_hex, actor_address, action_type, context, block_number, tx_hash, log_index, block_timestamp)
        VALUES ($1, $2, 'RECORD_REGISTERED', $3, $4, $5, $6, $7)`,
-      [recordId, user.walletAddress, `Encrypted record registered with CID ${cid}`, 14220990, `0xreg_${Date.now().toString(16)}`, 0, new Date()]
+      [recordId, user.walletAddress.toLowerCase(), `Encrypted record registered with CID ${cid}`, 14220990, `0xreg_${Date.now().toString(16)}`, 0, new Date()]
     );
 
-    // Conforms strictly to 03-API-SPEC.md response contract: { recordId, storageCID }
+    // Conforms strictly to 03-API-SPEC.md response contract: { recordId, storageCID }, plus helper aliases
     return res.status(201).json({
       recordId,
-      storageCID: cid
+      id: recordId,
+      storageCID: cid,
+      ipfsCid: cid,
+      contentHash,
+      sizeBytes,
+      label
     });
   } catch (err) {
     console.error('[Upload Record Error]:', err);
@@ -96,7 +101,7 @@ export async function getRecordById(req, res) {
     const { id } = req.params;
 
     const result = await db.query(
-      `SELECT record_id_hex, owner_address, label, ipfs_cid, created_at
+      `SELECT record_id_hex, owner_address, label, ipfs_cid, created_at, content_hash, file_size_bytes
        FROM records
        WHERE record_id_hex = $1`,
       [id]
@@ -131,9 +136,14 @@ export async function getRecordById(req, res) {
     }));
 
     return res.status(200).json({
+      id: record.record_id_hex,
       recordId: record.record_id_hex,
       label: record.label,
+      ownerWallet: record.owner_address,
       storageCID: record.ipfs_cid,
+      ipfsCid: record.ipfs_cid,
+      contentHash: record.content_hash,
+      fileSize: record.file_size_bytes ? `${Math.round(record.file_size_bytes / 1024)} KB` : '150 KB',
       createdAt: record.created_at,
       activeGrants
     });
@@ -150,17 +160,51 @@ export async function getRecordById(req, res) {
 export async function listRecords(req, res) {
   try {
     const user = req.user;
+    if (!user || !user.walletAddress) {
+      return res.status(401).json({ error: 'Unauthorized: Missing user context.' });
+    }
+
+    const callerWallet = user.walletAddress.toLowerCase();
     const result = await db.query(
-      `SELECT record_id_hex as "recordId", label, owner_address as "ownerWallet",
-              ipfs_cid as "storageCID", content_hash as "contentHash",
-              file_size_bytes as "fileSizeBytes", created_at as "createdAt"
-       FROM records
-       WHERE owner_address = $1
-       ORDER BY created_at DESC`,
-      [user.walletAddress]
+      `SELECT r.record_id_hex as "id",
+              r.record_id_hex as "recordId",
+              r.label,
+              r.owner_address as "ownerWallet",
+              r.ipfs_cid as "storageCID",
+              r.ipfs_cid as "ipfsCid",
+              r.content_hash as "contentHash",
+              r.file_size_bytes as "fileSizeBytes",
+              r.mime_type as "mimeType",
+              r.created_at as "createdAt"
+       FROM records r
+       WHERE LOWER(r.owner_address) = LOWER($1)
+       ORDER BY r.created_at DESC`,
+      [callerWallet]
     );
 
-    return res.status(200).json({ records: result.rows });
+    const rows = result.rows || [];
+    const formattedRecords = rows.map(r => {
+      const activeGrantsCount = typeof r.activeGrants === 'number'
+        ? r.activeGrants
+        : (Array.isArray(r.activeGrants) ? r.activeGrants.length : 0);
+
+      return {
+        id: r.id || r.recordId || r.record_id_hex,
+        recordId: r.recordId || r.id || r.record_id_hex,
+        label: r.label || 'Medical Record',
+        ownerWallet: r.ownerWallet || r.owner_address || callerWallet,
+        storageCID: r.storageCID || r.ipfsCid || r.ipfs_cid,
+        ipfsCid: r.ipfsCid || r.storageCID || r.ipfs_cid,
+        contentHash: r.contentHash || r.content_hash,
+        fileSizeBytes: r.fileSizeBytes || r.file_size_bytes || 0,
+        fileSize: r.fileSizeBytes ? `${Math.round(r.fileSizeBytes / 1024)} KB` : (r.file_size_bytes ? `${Math.round(r.file_size_bytes / 1024)} KB` : '150 KB'),
+        fileType: (r.mimeType || r.mime_type || 'PDF').toLowerCase().includes('pdf') ? 'PDF' : 'DOC',
+        activeGrants: activeGrantsCount,
+        createdAt: r.createdAt || r.created_at || new Date().toISOString()
+      };
+    });
+
+    return res.status(200).json({ records: formattedRecords });
   } catch (err) {
     console.error('[List Records Error]:', err);
     return res.status(500).json({ error: 'Failed to query user records' });

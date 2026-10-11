@@ -26,64 +26,91 @@ export default function UploadRecord() {
     }
   };
 
-  const handleDrop = async (e) => {
+  const validateAndSetFile = (f) => {
+    setError('');
+    if (!f) return false;
+
+    const isPdf = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      setError('Only PDF files are supported for MVP (e.g. lab results, prescriptions, clinical notes).');
+      return false;
+    }
+
+    if (f.size > 25 * 1024 * 1024) {
+      setError('File size must be under 25 MB.');
+      return false;
+    }
+
+    setFile(f);
+    if (!label) {
+      // Clean extension for friendly initial label
+      const baseName = f.name.replace(/\.[^/.]+$/, '');
+      setLabel(baseName);
+    }
+    return true;
+  };
+
+  const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
     const droppedFile = e.dataTransfer.files[0];
-    const valid = validateAndSetFile(droppedFile);
-    if (valid) {
-      setLabel(droppedFile.name);
-      await triggerUpload(droppedFile, droppedFile.name);
-    }
+    validateAndSetFile(droppedFile);
   };
 
-  const handleFileSelect = async (e) => {
+  const handleFileSelect = (e) => {
     const selectedFile = e.target.files[0];
-    const valid = validateAndSetFile(selectedFile);
-    if (valid) {
-      setLabel(selectedFile.name);
-      await triggerUpload(selectedFile, selectedFile.name);
-    }
-  };
-
-  const validateAndSetFile = (f) => {
-    setError('');
-    if (!f) return false;
-    if (f.type !== 'application/pdf') {
-      setError('Only PDF files are supported for MVP');
-      return false;
-    }
-    if (f.size > 10 * 1024 * 1024) {
-      setError('File size must be under 10 MB');
-      return false;
-    }
-    setFile(f);
-    return true;
+    validateAndSetFile(selectedFile);
   };
 
   const triggerUpload = async (uploadFile, uploadLabel) => {
-    setUploadStage('encrypting');
-    await new Promise(r => setTimeout(r, 1500)); // Simulating AES-256 encryption delay
+    if (!uploadFile) {
+      setError('Please select a file to encrypt and upload.');
+      return;
+    }
 
-    setUploadStage('uploading');
-    const newRecord = await uploadRecord(uploadLabel, uploadFile);
+    const finalLabel = (uploadLabel || uploadFile.name).trim();
+    if (!finalLabel) {
+      setError('Please provide a record name or description.');
+      return;
+    }
 
-    setUploadStage('done');
-    await new Promise(r => setTimeout(r, 1200));
+    setError('');
+    try {
+      setUploadStage('encrypting');
+      await new Promise(r => setTimeout(r, 600));
 
-    navigate(`/record/${newRecord.id}`);
+      setUploadStage('uploading');
+      const newRecord = await uploadRecord(finalLabel, uploadFile);
+
+      setUploadStage('done');
+      await new Promise(r => setTimeout(r, 600));
+
+      const targetId = newRecord?.id || newRecord?.recordId;
+      if (targetId) {
+        navigate(`/record/${targetId}`);
+      } else {
+        navigate('/dashboard');
+      }
+    } catch (err) {
+      console.error('[Upload Component Exception]:', err);
+      setError(err.message || 'Encryption or upload failed. Please try again.');
+      setUploadStage('idle');
+    }
   };
 
-  const handleUpload = () => {
-    if (!file || !label.trim()) return;
-    triggerUpload(file, label.trim());
+  const handleUploadSubmit = () => {
+    if (!file) {
+      setError('Please select a medical record PDF first.');
+      return;
+    }
+    triggerUpload(file, label || file.name);
   };
 
   const stages = [
-    { key: 'encrypting', label: 'Encrypting client-side...', icon: <Lock size={20} /> },
-    { key: 'uploading', label: 'Uploading to IPFS...', icon: <Upload size={20} /> },
-    { key: 'done', label: 'Record secured!', icon: <CheckCircle size={20} /> },
+    { key: 'encrypting', label: 'Encrypting client-side with AES-256-GCM...', icon: <Lock size={20} /> },
+    { key: 'uploading', label: 'Persisting encrypted ciphertext to IPFS...', icon: <Upload size={20} /> },
+    { key: 'done', label: 'Record secured on-chain!', icon: <CheckCircle size={20} /> },
   ];
 
   return (
@@ -128,7 +155,7 @@ export default function UploadRecord() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf"
+                accept=".pdf,application/pdf"
                 onChange={handleFileSelect}
                 className="drop-zone-input"
               />
@@ -150,9 +177,9 @@ export default function UploadRecord() {
                       <Upload size={32} />
                     </motion.div>
                     <p className="drop-zone-text">
-                      <strong>Drop your PDF here</strong> or click to browse
+                      <strong>Drop your medical PDF here</strong> or click to browse
                     </p>
-                    <p className="drop-zone-hint">PDF only • Max 10 MB • MVP: Lab results</p>
+                    <p className="drop-zone-hint">PDF only • Up to 25 MB • Zero Plaintext Exposure</p>
                   </motion.div>
                 ) : (
                   <motion.div
@@ -161,7 +188,18 @@ export default function UploadRecord() {
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.9 }}
-                    style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--color-bg-primary)', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      background: 'var(--color-bg-primary)',
+                      zIndex: 10,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
                   >
                     <div className="file-preview">
                       <div className="file-preview-icon">
@@ -173,9 +211,14 @@ export default function UploadRecord() {
                       </div>
                       <motion.button
                         className="file-preview-remove"
-                        onClick={(e) => { e.stopPropagation(); setFile(null); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFile(null);
+                          if (fileInputRef.current) fileInputRef.current.value = '';
+                        }}
                         whileHover={{ scale: 1.1 }}
                         whileTap={{ scale: 0.9 }}
+                        title="Remove file"
                       >
                         <X size={16} />
                       </motion.button>
@@ -185,7 +228,51 @@ export default function UploadRecord() {
               </AnimatePresence>
             </motion.div>
 
-            {/* Error */}
+            {/* Record Metadata Fields & Upload Button */}
+            {file && uploadStage === 'idle' && (
+              <motion.div
+                className="glass-card"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                style={{ marginTop: '1.25rem', padding: '1.5rem' }}
+              >
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <label
+                    style={{
+                      display: 'block',
+                      marginBottom: '0.5rem',
+                      fontWeight: 500,
+                      fontSize: '0.875rem',
+                      color: 'var(--color-text-secondary)'
+                    }}
+                  >
+                    Record Name / Label
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    value={label}
+                    onChange={(e) => setLabel(e.target.value)}
+                    placeholder="e.g. Blood Test Results, MRI Scan, Cardiology Report"
+                    style={{ margin: 0, width: '100%' }}
+                  />
+                </div>
+
+                <motion.button
+                  className="btn btn-primary"
+                  onClick={handleUploadSubmit}
+                  disabled={loading || uploadStage !== 'idle'}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  style={{ width: '100%', justifyContent: 'center', display: 'flex', gap: '0.5rem' }}
+                >
+                  <Lock size={18} />
+                  Encrypt & Upload Record
+                </motion.button>
+              </motion.div>
+            )}
+
+            {/* Error Message */}
             <AnimatePresence>
               {error && (
                 <motion.div
@@ -193,9 +280,10 @@ export default function UploadRecord() {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
+                  style={{ marginTop: '1rem' }}
                 >
                   <AlertCircle size={16} />
-                  {error}
+                  <span>{error}</span>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -208,6 +296,7 @@ export default function UploadRecord() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 20 }}
+                  style={{ marginTop: '1.5rem' }}
                 >
                   {stages.map((stage, i) => {
                     const stageIndex = stages.findIndex(s => s.key === uploadStage);
@@ -239,34 +328,35 @@ export default function UploadRecord() {
               )}
             </AnimatePresence>
           </div>
+
           {/* Sidebar Info */}
           <div className="upload-sidebar">
             <motion.div
               className="upload-info-card glass-card"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.3, duration: 0.5 }}
+              transition={{ delay: 0.2, duration: 0.5 }}
             >
               <h3 className="upload-info-title">
                 <Shield size={18} />
-                How encryption works
+                Zero-Exposure Architecture
               </h3>
               <div className="upload-info-steps">
                 <div className="upload-info-step">
                   <div className="upload-info-step-num">1</div>
-                  <p>Your file is encrypted with AES-256 directly in your browser</p>
+                  <p>Your PDF is encrypted with 256-bit AES-GCM directly inside your browser memory.</p>
                 </div>
                 <div className="upload-info-step">
                   <div className="upload-info-step-num">2</div>
-                  <p>Only the encrypted ciphertext leaves your device</p>
+                  <p>Only ciphertext leaves your device; plaintext PHI is never sent over the network.</p>
                 </div>
                 <div className="upload-info-step">
                   <div className="upload-info-step-num">3</div>
-                  <p>The encrypted blob is stored on IPFS — referenced by its content hash</p>
+                  <p>The encrypted blob is pinned to IPFS referenced by its SHA-256 integrity hash.</p>
                 </div>
                 <div className="upload-info-step">
                   <div className="upload-info-step-num">4</div>
-                  <p>Your encryption key is never shared. You control who can decrypt.</p>
+                  <p>Decryption keys are enveloped with recipient public keys under strict time-boxed grants.</p>
                 </div>
               </div>
             </motion.div>

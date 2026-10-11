@@ -6,6 +6,7 @@ import {
   authenticateWalletSignature,
   issueSessionToken
 } from '../middleware/auth.js';
+import { verifyFirebaseIdToken } from '../services/firebase.service.js';
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
@@ -160,7 +161,21 @@ export function getNonce(req, res) {
  */
 export async function connectWallet(req, res) {
   try {
-    const { walletAddress, signature, nonce, message, role } = req.body;
+    let { walletAddress, signature, nonce, message, role } = req.body;
+
+    // If full SIWE message is passed, defensively extract address and nonce if omitted
+    if (message) {
+      try {
+        if (!walletAddress) {
+          const addressMatch = message.match(/(0x[a-fA-F0-9]{40})/);
+          if (addressMatch) walletAddress = addressMatch[1];
+        }
+        if (!nonce) {
+          const nonceMatch = message.match(/Nonce:\s*([a-zA-Z0-9]+)/);
+          if (nonceMatch) nonce = nonceMatch[1];
+        }
+      } catch (e) {}
+    }
 
     if (!walletAddress || !signature || !nonce) {
       return res.status(400).json({
@@ -178,8 +193,14 @@ export async function connectWallet(req, res) {
 
     return res.status(200).json({
       sessionToken,
+      token: sessionToken,
       role: assignedRole,
-      walletAddress: walletAddress.toLowerCase()
+      walletAddress: walletAddress.toLowerCase(),
+      user: {
+        id: `user_${walletAddress.substring(2, 8).toLowerCase()}`,
+        walletAddress: walletAddress.toLowerCase(),
+        role: assignedRole
+      }
     });
   } catch (error) {
     console.error('[SIWE Connect Error]:', error.message);
@@ -206,7 +227,25 @@ export function getMe(req, res) {
  */
 export async function googleAuth(req, res) {
   try {
-    const { email, name, role } = req.body;
+    let { email, name, role, idToken } = req.body;
+
+    // Verify Firebase ID Token if provided by client
+    if (idToken) {
+      try {
+        const decoded = await verifyFirebaseIdToken(idToken);
+        if (decoded?.email) {
+          email = decoded.email;
+        }
+        if (decoded?.name && !name) {
+          name = decoded.name;
+        }
+      } catch (tokenErr) {
+        console.warn('[Firebase Verification Notice]:', tokenErr.message);
+        if (process.env.NODE_ENV === 'production' && !email) {
+          return res.status(401).json({ error: 'Invalid or expired Firebase authentication token.' });
+        }
+      }
+    }
 
     if (!email) {
       return res.status(400).json({ error: 'Missing email from Google authentication.' });
@@ -254,8 +293,16 @@ export async function googleAuth(req, res) {
 
     const sessionToken = issueSessionToken(userPayload);
 
+    res.cookie('medvault_token', sessionToken, {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
     return res.status(200).json({
       sessionToken,
+      token: sessionToken,
       user: userPayload,
       role: user.role,
       walletAddress: user.wallet_address,

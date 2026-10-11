@@ -18,9 +18,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: medvault-db
-          property: connectionString
+        sync: false
+      - key: MONGODB_URI
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: RPC_URL
@@ -56,10 +56,3 @@ services:
         value: "80002"
       - key: VITE_CONTRACT_ADDRESS
         value: "0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6"
-
-# ─── 3. Managed PostgreSQL Database ────────────────────────────────
-databases:
-  - name: medvault-db
-    databaseName: medvault
-    user: medvault
-    plan: free # or 'starter'

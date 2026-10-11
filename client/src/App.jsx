@@ -10,6 +10,9 @@ import Dashboard from './pages/Dashboard';
 import UploadRecord from './pages/UploadRecord';
 import RecordDetail from './pages/RecordDetail';
 import DoctorAccess from './pages/DoctorAccess';
+import AiAssistant from './pages/AiAssistant';
+import DatabaseViewer from './pages/DatabaseViewer';
+import AiAssistantWidget from './components/shared/AiAssistantWidget';
 import NotFound from './pages/NotFound';
 
 // Page transition wrapper
@@ -85,6 +88,12 @@ function AnimatedRoutes() {
         <Route path="/doctor-access" element={
           <PageTransition><DoctorAccess /></PageTransition>
         } />
+        <Route path="/assistant" element={
+          <PageTransition><AiAssistant /></PageTransition>
+        } />
+        <Route path="/database" element={
+          <PageTransition><DatabaseViewer /></PageTransition>
+        } />
         <Route path="*" element={
           <PageTransition><NotFound /></PageTransition>
         } />
@@ -102,6 +111,7 @@ export default function App() {
           <AnimatedRoutes />
         </ErrorBoundary>
         <ToastContainer />
+        <AiAssistantWidget />
         <div 
           style={{
             position: 'fixed',

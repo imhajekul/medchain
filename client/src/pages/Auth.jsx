@@ -2,15 +2,14 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Shield, Wallet, ArrowRight, User, Mail, Lock,
-  Stethoscope, Heart, Eye, EyeOff, CheckCircle
+  Shield, CheckCircle, Stethoscope, Heart, Lock, KeyRound, Sparkles
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import './Auth.css';
 
 function GoogleIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
       <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
       <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
@@ -22,121 +21,75 @@ function GoogleIcon() {
 export default function Auth() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { signIn, loginWithEmail, registerWithEmail, signInWithGoogle, loading } = useApp();
+  const {
+    signInWithGoogle,
+    signInWithGoogleRedirect,
+    signInWithGoogleManual,
+    loading
+  } = useApp();
 
-  // Read URL query parameters (?mode=register or ?mode=signin, ?role=patient or ?role=doctor)
-  const initialMode = searchParams.get('mode') === 'register' ? 'register' : 'signin';
   const initialRole = searchParams.get('role') === 'doctor' ? 'doctor' : 'patient';
+  const [role, setRole] = useState(initialRole);
+  const [showManualGoogle, setShowManualGoogle] = useState(false);
+  const [manualGoogleEmail, setManualGoogleEmail] = useState('');
+  const [manualGoogleName, setManualGoogleName] = useState('');
+  const [errors, setErrors] = useState({});
 
-  const [activeTab, setActiveTab] = useState(initialMode); // 'signin' | 'register'
-  const [role, setRole] = useState(initialRole); // 'patient' | 'doctor'
-  const [authMethod, setAuthMethod] = useState('email'); // 'email' | 'wallet'
-  const [showPassword, setShowPassword] = useState(false);
-
-  // Sync with search params if they change
   useEffect(() => {
-    const urlMode = searchParams.get('mode');
-    if (urlMode === 'register' || urlMode === 'signin') {
-      setActiveTab(urlMode);
-    }
     const urlRole = searchParams.get('role');
     if (urlRole === 'doctor' || urlRole === 'patient') {
       setRole(urlRole);
     }
   }, [searchParams]);
 
-  // Clean form fields (strictly no prefilled defaults)
-  const [form, setForm] = useState({
-    displayName: '',
-    email: '',
-    walletAddress: '',
-    password: ''
-  });
-  const [errors, setErrors] = useState({});
-
-  const updateField = (field, value) => {
-    setForm(prev => ({ ...prev, [field]: value }));
-    if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
-    if (errors.general) setErrors(prev => ({ ...prev, general: '' }));
-  };
-
-  const handleTabSwitch = (tab) => {
-    setActiveTab(tab);
-    setSearchParams({ mode: tab, role });
-    setErrors({});
-  };
-
   const handleRoleSwitch = (newRole) => {
     setRole(newRole);
-    setSearchParams({ mode: activeTab, role: newRole });
+    setSearchParams({ role: newRole });
     setErrors({});
-  };
-
-  const validate = () => {
-    const errs = {};
-    if (authMethod === 'email') {
-      if (activeTab === 'register' && !form.displayName.trim()) {
-        errs.displayName = 'Full name is required';
-      }
-      if (!form.email.trim()) {
-        errs.email = 'Email address is required';
-      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
-        errs.email = 'Enter a valid email address';
-      }
-      if (!form.password) {
-        errs.password = 'Password is required';
-      } else if (form.password.length < 6) {
-        errs.password = 'Password must be at least 6 characters';
-      }
-    } else {
-      if (!form.walletAddress.trim()) {
-        errs.walletAddress = 'Wallet address is required';
-      } else if (!form.walletAddress.startsWith('0x') || form.walletAddress.length < 10) {
-        errs.walletAddress = 'Enter a valid 0x Ethereum address';
-      }
-    }
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!validate()) return;
-
-    try {
-      if (authMethod === 'email') {
-        if (activeTab === 'register') {
-          await registerWithEmail(form.email.trim(), form.password, role, form.displayName.trim());
-        } else {
-          await loginWithEmail(form.email.trim(), form.password);
-        }
-      } else {
-        await signIn({
-          walletAddress: form.walletAddress.trim(),
-          role
-        });
-      }
-      // Differentiated routing based on account role
-      navigate(role === 'doctor' ? '/doctor-access' : '/dashboard');
-    } catch (err) {
-      setErrors(prev => ({ ...prev, general: err.message || 'Authentication failed' }));
-    }
   };
 
   const handleGoogleAuth = async () => {
     try {
       setErrors({});
       await signInWithGoogle(role);
-      // Differentiated routing based on account role
       navigate(role === 'doctor' ? '/doctor-access' : '/dashboard');
     } catch (err) {
       if (err.message && !err.message.includes('canceled')) {
-        setErrors(prev => ({ ...prev, general: err.message || 'Google authentication failed' }));
+        setErrors({ general: err.message || 'Google authentication failed' });
       }
     }
   };
 
-  const isRegister = activeTab === 'register';
+  const handleGoogleRedirect = async () => {
+    try {
+      setErrors({});
+      await signInWithGoogleRedirect(role);
+      navigate(role === 'doctor' ? '/doctor-access' : '/dashboard');
+    } catch (err) {
+      if (err.message && !err.message.includes('canceled')) {
+        setErrors({ general: err.message || 'Google redirect failed' });
+      }
+    }
+  };
+
+  const handleManualGoogleSubmit = async (e) => {
+    e.preventDefault();
+    if (!manualGoogleEmail.trim() || !manualGoogleEmail.includes('@')) {
+      setErrors({ manualGoogle: 'Enter a valid Google email address' });
+      return;
+    }
+    try {
+      setErrors({});
+      await signInWithGoogleManual({
+        email: manualGoogleEmail.trim(),
+        name: manualGoogleName.trim(),
+        role
+      });
+      navigate(role === 'doctor' ? '/doctor-access' : '/dashboard');
+    } catch (err) {
+      setErrors({ manualGoogle: err.message || 'Manual Google sign-in failed' });
+    }
+  };
 
   return (
     <div className="auth-page page-wrapper">
@@ -152,44 +105,26 @@ export default function Auth() {
           transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
         >
           {/* Logo & Header */}
-          <div className="auth-brand" style={{ marginBottom: '20px' }}>
+          <div className="auth-brand" style={{ marginBottom: '24px' }}>
             <motion.div
               className="auth-brand-logo"
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
             >
-              <Shield size={32} />
+              <Shield size={34} />
             </motion.div>
             <h1 className="auth-brand-title">
               Med<span className="gradient-text">Vault</span> Access
             </h1>
             <p className="auth-brand-subtitle">
-              Patient-owned, zero-knowledge encrypted medical records.
+              Patient-owned, zero-knowledge encrypted medical records with Google OAuth & auto-provisioned sovereign vault.
             </p>
           </div>
 
-          {/* Primary Top Tabs: [Sign In] vs [Register / Create Account] */}
-          <div className="auth-main-tabs" role="tablist" aria-label="Authentication Options">
-            <button
-              type="button"
-              className={`auth-main-tab ${!isRegister ? 'active' : ''}`}
-              onClick={() => handleTabSwitch('signin')}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              className={`auth-main-tab ${isRegister ? 'active' : ''}`}
-              onClick={() => handleTabSwitch('register')}
-            >
-              Create Account
-            </button>
-          </div>
-
-          {/* Role Selector: Separate Patient vs Doctor */}
-          <div className="auth-role-selector">
-            <div className="auth-role-label">Select Account Type:</div>
+          {/* Account Role Selector */}
+          <div className="auth-role-selector" style={{ marginBottom: '20px' }}>
+            <div className="auth-role-label">Choose Your Portal Account Type:</div>
             <div className="auth-role-grid">
               <button
                 type="button"
@@ -197,11 +132,11 @@ export default function Auth() {
                 onClick={() => handleRoleSwitch('patient')}
               >
                 <div className="auth-role-icon patient-icon">
-                  <Heart size={18} />
+                  <Heart size={20} />
                 </div>
                 <div className="auth-role-text">
                   <span className="auth-role-name">Patient Account</span>
-                  <span className="auth-role-desc">Own & encrypt your medical records</span>
+                  <span className="auth-role-desc">Manage & client-side encrypt personal records</span>
                 </div>
               </button>
 
@@ -211,230 +146,170 @@ export default function Auth() {
                 onClick={() => handleRoleSwitch('doctor')}
               >
                 <div className="auth-role-icon doctor-icon">
-                  <Stethoscope size={18} />
+                  <Stethoscope size={20} />
                 </div>
                 <div className="auth-role-text">
                   <span className="auth-role-name">Healthcare Provider</span>
-                  <span className="auth-role-desc">Doctor portal to review granted records</span>
+                  <span className="auth-role-desc">Doctor portal to review granted patient records</span>
                 </div>
               </button>
             </div>
           </div>
 
-          {/* One-Click Firebase Google Registration & Authentication */}
-          <div className="auth-google-wrapper">
+          {/* General Error Alert */}
+          {errors.general && (
+            <div className="auth-alert-error" style={{ marginBottom: '16px' }}>
+              {errors.general}
+            </div>
+          )}
+
+          {/* Primary Action: Standardized "Continue with Google" */}
+          <div className="auth-google-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
             <motion.button
               type="button"
               className="btn-google-auth"
               onClick={handleGoogleAuth}
               disabled={loading}
-              whileHover={{ scale: 1.01, boxShadow: '0 4px 14px rgba(0,0,0,0.2)' }}
+              whileHover={{ scale: 1.01, boxShadow: '0 6px 20px rgba(66, 133, 244, 0.25)' }}
               whileTap={{ scale: 0.99 }}
+              style={{
+                padding: '1rem 1.25rem',
+                borderRadius: '12px',
+                border: '1px solid rgba(66, 133, 244, 0.3)',
+                background: 'linear-gradient(180deg, rgba(66, 133, 244, 0.12) 0%, rgba(66, 133, 244, 0.05) 100%)'
+              }}
             >
               <GoogleIcon />
               <div className="google-btn-content">
-                <span className="google-btn-main">
-                  {isRegister ? '1-Click Register with Google' : '1-Click Sign In with Google'}
+                <span className="google-btn-main" style={{ fontSize: '1rem', fontWeight: 600 }}>
+                  Continue with Google
                 </span>
-                <span className="google-role-sub">
-                  Firebase Auth • {role === 'doctor' ? 'Healthcare Provider' : 'Patient Portal'}
+                <span className="google-role-sub" style={{ fontSize: '0.75rem', opacity: 0.85 }}>
+                  1-Click Sign-In • {role === 'doctor' ? 'Healthcare Provider' : 'Patient Vault'}
                 </span>
               </div>
             </motion.button>
-          </div>
 
-          {/* Divider */}
-          <div className="auth-divider">
-            <span>Or continue with credentials</span>
-          </div>
+            {/* Secondary OAuth Helpers: Full-page redirect & manual fallback */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleGoogleRedirect}
+                disabled={loading}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.35rem',
+                  fontSize: '0.75rem',
+                  padding: '0.625rem 0.5rem',
+                  borderRadius: '8px'
+                }}
+                title="Full-page browser redirect via Firebase signInWithRedirect"
+              >
+                <span>🌐 Google Redirect</span>
+              </button>
 
-          {/* Auth Method Selector (Email & Password vs Web3 Wallet) */}
-          <div className="auth-method-tabs">
-            <button
-              type="button"
-              className={`auth-method-tab ${authMethod === 'email' ? 'active' : ''}`}
-              onClick={() => { setAuthMethod('email'); setErrors({}); }}
-            >
-              <Mail size={14} /> Email & Password
-            </button>
-            <button
-              type="button"
-              className={`auth-method-tab ${authMethod === 'wallet' ? 'active' : ''}`}
-              onClick={() => { setAuthMethod('wallet'); setErrors({}); }}
-            >
-              <Wallet size={14} /> Web3 Wallet
-            </button>
-          </div>
-
-          {/* General Error Alert */}
-          {errors.general && (
-            <div className="auth-alert-error">
-              {errors.general}
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowManualGoogle(prev => !prev)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.35rem',
+                  fontSize: '0.75rem',
+                  padding: '0.625rem 0.5rem',
+                  borderRadius: '8px'
+                }}
+              >
+                <span>✍️ {showManualGoogle ? 'Hide Manual' : 'Manual Google'}</span>
+              </button>
             </div>
-          )}
 
-          {/* Authentication Form */}
-          <form className="auth-form" onSubmit={handleSubmit} noValidate>
-            {authMethod === 'email' ? (
-              <>
-                {/* Full Name (Only on Registration) */}
-                {isRegister && (
-                  <div className="input-group">
-                    <label className="input-label" htmlFor="name">
-                      <User size={14} /> Full Name
-                    </label>
-                    <input
-                      id="name"
-                      className={`input-field ${errors.displayName ? 'input-error' : ''}`}
-                      type="text"
-                      placeholder={role === 'doctor' ? 'Dr. Sarah Smith' : 'Alex Morgan'}
-                      value={form.displayName}
-                      onChange={e => updateField('displayName', e.target.value)}
-                      autoComplete="name"
-                    />
-                    {errors.displayName && <span className="field-error">{errors.displayName}</span>}
+            {/* Manual Google Account Drawer */}
+            <AnimatePresence>
+              {showManualGoogle && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  style={{
+                    padding: '1rem',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '10px'
+                  }}
+                >
+                  <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginBottom: '0.625rem' }}>
+                    Enter your verified Google email address directly:
                   </div>
-                )}
-
-                {/* Email Address */}
-                <div className="input-group">
-                  <label className="input-label" htmlFor="email">
-                    <Mail size={14} /> Email Address
-                  </label>
-                  <input
-                    id="email"
-                    className={`input-field ${errors.email ? 'input-error' : ''}`}
-                    type="email"
-                    placeholder={role === 'doctor' ? 'dr.smith@hospital.org' : 'alex@example.com'}
-                    value={form.email}
-                    onChange={e => updateField('email', e.target.value)}
-                    autoComplete="email"
-                  />
-                  {errors.email && <span className="field-error">{errors.email}</span>}
-                </div>
-
-                {/* Password */}
-                <div className="input-group">
-                  <label className="input-label" htmlFor="password">
-                    <Lock size={14} /> Password
-                  </label>
-                  <div className="input-with-action">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
                     <input
-                      id="password"
-                      className={`input-field ${errors.password ? 'input-error' : ''}`}
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="Minimum 6 characters"
-                      value={form.password}
-                      onChange={e => updateField('password', e.target.value)}
-                      autoComplete={isRegister ? 'new-password' : 'current-password'}
+                      type="email"
+                      className="input-field"
+                      placeholder="your.google.account@gmail.com"
+                      value={manualGoogleEmail}
+                      onChange={(e) => setManualGoogleEmail(e.target.value)}
+                      style={{ fontSize: '0.875rem', padding: '0.625rem 0.875rem', margin: 0 }}
                     />
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Display Name (optional)"
+                      value={manualGoogleName}
+                      onChange={(e) => setManualGoogleName(e.target.value)}
+                      style={{ fontSize: '0.875rem', padding: '0.625rem 0.875rem', margin: 0 }}
+                    />
+                    {errors.manualGoogle && (
+                      <span className="field-error" style={{ fontSize: '0.75rem' }}>
+                        {errors.manualGoogle}
+                      </span>
+                    )}
                     <button
                       type="button"
-                      className="btn btn-ghost btn-sm input-action-btn"
-                      onClick={() => setShowPassword(!showPassword)}
-                      aria-label="Toggle password visibility"
+                      className="btn btn-primary btn-sm"
+                      onClick={handleManualGoogleSubmit}
+                      disabled={loading}
+                      style={{ width: '100%', justifyContent: 'center' }}
                     >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      Authenticate Google Profile
                     </button>
                   </div>
-                  {errors.password && <span className="field-error">{errors.password}</span>}
-                </div>
-              </>
-            ) : (
-              <>
-                {/* Web3 Wallet Address */}
-                <div className="input-group">
-                  <label className="input-label" htmlFor="wallet">
-                    <Wallet size={14} /> Ethereum Wallet Address (EIP-4361)
-                  </label>
-                  <div className="input-with-action">
-                    <input
-                      id="wallet"
-                      className={`input-field ${errors.walletAddress ? 'input-error' : ''}`}
-                      type="text"
-                      placeholder="0x..."
-                      value={form.walletAddress}
-                      onChange={e => updateField('walletAddress', e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm input-action-btn"
-                      onClick={() => updateField('walletAddress', `0x${Array.from({length: 40}, () => Math.floor(Math.random() * 16).toString(16)).join('')}`)}
-                    >
-                      Generate Key
-                    </button>
-                  </div>
-                  {errors.walletAddress && <span className="field-error">{errors.walletAddress}</span>}
-                </div>
-              </>
-            )}
-
-            {/* Submit Action */}
-            <motion.button
-              type="submit"
-              className="btn btn-primary btn-lg auth-submit-btn"
-              disabled={loading}
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.99 }}
-            >
-              {loading ? (
-                <span className="auth-loading">
-                  <motion.span
-                    className="auth-spinner"
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                  />
-                  Processing...
-                </span>
-              ) : (
-                <>
-                  {authMethod === 'email' ? (
-                    isRegister
-                      ? `Create ${role === 'doctor' ? 'Doctor' : 'Patient'} Account`
-                      : `Sign In as ${role === 'doctor' ? 'Healthcare Provider' : 'Patient'}`
-                  ) : (
-                    'Verify Wallet Signature'
-                  )}
-                  <ArrowRight size={18} />
-                </>
+                </motion.div>
               )}
-            </motion.button>
-          </form>
+            </AnimatePresence>
+          </div>
 
-          {/* Toggle between Register and Sign In */}
-          <div className="auth-toggle-footer">
-            {isRegister ? (
-              <p>
-                Already have an account?{' '}
-                <button
-                  type="button"
-                  className="auth-switch-link"
-                  onClick={() => handleTabSwitch('signin')}
-                >
-                  Sign In here
-                </button>
-              </p>
-            ) : (
-              <p>
-                Don't have an account yet?{' '}
-                <button
-                  type="button"
-                  className="auth-switch-link"
-                  onClick={() => handleTabSwitch('register')}
-                >
-                  Create Account / Register
-                </button>
-              </p>
-            )}
+          {/* Auto-Provisioning & Security Explainer */}
+          <div
+            className="glass-card"
+            style={{
+              marginTop: '1.5rem',
+              padding: '1rem 1.25rem',
+              borderRadius: '10px',
+              border: '1px solid rgba(255, 255, 255, 0.07)',
+              background: 'rgba(255, 255, 255, 0.02)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem', color: 'var(--color-accent)' }}>
+              <Sparkles size={16} />
+              <strong style={{ fontSize: '0.8125rem' }}>Automatic Wallet Auto-Provisioning</strong>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
+              Logging in with Google securely auto-provisions and links your sovereign cryptographic Ethereum wallet (<code style={{ color: 'var(--color-primary)' }}>0x...</code>) in MongoDB. No seed phrases or manual passwords required.
+            </p>
           </div>
 
           {/* Security Guarantee Note */}
-          <div className="auth-security-note">
+          <div className="auth-security-note" style={{ marginTop: '1.25rem' }}>
             <CheckCircle size={14} />
             <span>
               {role === 'doctor'
-                ? 'Doctor Portal: Authorized access only. All patient record reviews generate cryptographic audit events.'
-                : 'Patient Portal: Zero Data Exposure. Health data is encrypted on your device with AES-256-GCM before upload.'}
+                ? 'Doctor Portal: Authorized review only. All record accesses emit cryptographic audit receipts on Polygon.'
+                : 'Patient Portal: Zero Plaintext Exposure. Records are encrypted client-side using AES-256-GCM before transmission.'}
             </span>
           </div>
         </motion.div>

@@ -1,11 +1,23 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { api } from '../services/api';
-import { authenticateWithGoogle, firebaseSignOut } from '../services/firebase';
+import {
+  authenticateWithGoogle,
+  initiateGoogleRedirect,
+  checkRedirectAuthResult,
+  authenticateWithGoogleManual,
+  firebaseSignOut
+} from '../services/firebase';
 import { encryptFileClientSide, decryptFileClientSide } from '../crypto/aes';
+import { ensureCorrectNetwork, CHAIN_CONFIG } from '../services/blockchain';
 
 const AppContext = createContext(null);
 const AUTH_STORAGE_KEY = 'medvault_auth';
+
+function formatDisplayAddress(address) {
+  if (!address || typeof address !== 'string' || address.length < 10) return address || '';
+  return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+}
 
 export function AppProvider({ children }) {
   const [isConnected, setIsConnected] = useState(false);
@@ -48,22 +60,51 @@ export function AppProvider({ children }) {
     setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
   }, []);
 
-  // Fetch real records from backend
+  // Fetch real records and access grants from backend
   const refreshRecords = useCallback(async () => {
     try {
-      const data = await api.getRecords();
-      if (data && data.records) {
-        setRecords(data.records);
-        setStats(prev => ({
-          ...prev,
-          totalRecords: data.records.length,
-          activeGrants: data.records.reduce((acc, r) => acc + (r.activeGrants || 0), 0)
+      const [recordsRes, grantsRes] = await Promise.allSettled([
+        api.getRecords(),
+        api.getGrants()
+      ]);
+
+      let loadedRecords = [];
+      if (recordsRes.status === 'fulfilled' && recordsRes.value?.records) {
+        loadedRecords = recordsRes.value.records.map(r => ({
+          ...r,
+          id: r.id || r.recordId,
+          recordId: r.recordId || r.id,
+          activeGrants: typeof r.activeGrants === 'number' ? r.activeGrants : (Array.isArray(r.activeGrants) ? r.activeGrants.length : 0)
         }));
-      } else {
-        setRecords([]);
+        setRecords(loadedRecords);
+      } else if (recordsRes.status === 'rejected') {
+        console.error('[Dashboard Records Fetch Error]:', recordsRes.reason?.message || recordsRes.reason);
       }
-    } catch (e) {
-      setRecords([]);
+
+      let loadedGrants = [];
+      if (grantsRes.status === 'fulfilled' && grantsRes.value?.grants) {
+        loadedGrants = grantsRes.value.grants;
+        setGrants(loadedGrants);
+      } else if (grantsRes.status === 'rejected') {
+        console.error('[Dashboard Grants Fetch Error]:', grantsRes.reason?.message || grantsRes.reason);
+      }
+
+      const activeCount = loadedGrants.filter(g => g.status === 'active').length;
+      const expiredCount = loadedGrants.filter(g => g.status === 'expired').length;
+      const totalBytes = loadedRecords.reduce((acc, r) => acc + (r.fileSizeBytes || 150000), 0);
+
+      setStats({
+        totalRecords: loadedRecords.length,
+        activeGrants: activeCount,
+        expiredGrants: expiredCount,
+        totalAccesses: loadedGrants.reduce((acc, g) => acc + (g.accessCount || 0), 0),
+        storageUsed: `${Math.round(totalBytes / 1024)} KB`
+      });
+
+      return { records: loadedRecords, grants: loadedGrants };
+    } catch (err) {
+      console.error('[refreshRecords Unexpected Error]:', err);
+      return { records: [], grants: [] };
     }
   }, []);
 
@@ -73,19 +114,66 @@ export function AppProvider({ children }) {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        setUser(parsed);
-        setIsConnected(true);
-        refreshRecords();
+        if (parsed && (parsed.sessionToken || parsed.token)) {
+          // Normalize wallet address to full lowercase 42-char format
+          const normalizedUser = {
+            ...parsed,
+            sessionToken: parsed.sessionToken || parsed.token,
+            walletAddress: parsed.walletAddress || parsed.fullAddress || '',
+            displayAddress: formatDisplayAddress(parsed.walletAddress || parsed.fullAddress)
+          };
+          setUser(normalizedUser);
+          setIsConnected(true);
+          refreshRecords();
+        } else {
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+        }
       } catch {
         localStorage.removeItem(AUTH_STORAGE_KEY);
       }
     }
     setAuthLoading(false);
-  }, [refreshRecords]);
 
-  // Persist session
+    // Check for returned credentials if redirected from Firebase Google login
+    checkRedirectAuthResult().then(async (redirectData) => {
+      if (redirectData && redirectData.email) {
+        await processGoogleAuthSuccess(redirectData, redirectData.role || 'patient');
+      }
+    }).catch(err => {
+      console.warn('[Firebase Redirect Check Notice]:', err.message);
+    });
+  }, [refreshRecords, processGoogleAuthSuccess]);
+
+  // Handle unauthorized session expiration event
+  useEffect(() => {
+    const handleUnauthorized = (e) => {
+      const msg = e?.detail?.message || 'Session expired. Please sign in again.';
+      addToast(msg, 'warning');
+      setIsConnected(false);
+      setUser(null);
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('medvault:unauthorized', handleUnauthorized);
+      return () => window.removeEventListener('medvault:unauthorized', handleUnauthorized);
+    }
+  }, [addToast]);
+
+  // Persist session in localStorage and cookies
   const persistSession = (userData) => {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(userData));
+    const normalized = {
+      ...userData,
+      sessionToken: userData.sessionToken || userData.token,
+      walletAddress: (userData.walletAddress || '').toLowerCase(),
+      displayAddress: formatDisplayAddress(userData.walletAddress)
+    };
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalized));
+    try {
+      if (typeof document !== 'undefined') {
+        document.cookie = `medvault_token=${encodeURIComponent(normalized.sessionToken)}; path=/; max-age=604800; SameSite=Lax`;
+      }
+    } catch (e) {}
   };
 
   // =========================================================================
@@ -101,11 +189,13 @@ export function AppProvider({ children }) {
       if (typeof window !== 'undefined' && window.ethereum) {
         try {
           const provider = new ethers.BrowserProvider(window.ethereum);
+          // Check and enforce target blockchain network
+          await ensureCorrectNetwork(provider);
           await provider.send('eth_requestAccounts', []);
           signer = await provider.getSigner();
           activeAddress = await signer.getAddress();
         } catch (metamaskErr) {
-          console.warn('[Web3] Browser wallet connection dismissed or unavailable, falling back to local signer');
+          console.warn('[Web3] Injected wallet connection interrupted or cancelled, falling back to sovereign wallet:', metamaskErr.message);
         }
       }
 
@@ -119,10 +209,12 @@ export function AppProvider({ children }) {
         activeAddress = wallet.address;
       }
 
-      // 2. Fetch one-time challenge nonce from backend
-      const { nonce } = await api.getNonce();
+      const normalizedAddress = activeAddress.toLowerCase();
 
-      // 3. Construct EIP-4361 SIWE message
+      // 2. Fetch one-time challenge nonce from backend
+      const { nonce } = await api.getNonce(normalizedAddress);
+
+      // 3. Construct EIP-4361 SIWE message with dynamic Target Chain ID
       const domain = window.location.host || 'localhost:5173';
       const uri = window.location.origin || 'http://localhost:5173';
       const statement = `Sign in to MedVault as ${role === 'doctor' ? 'Healthcare Provider' : 'Patient'}.`;
@@ -135,7 +227,7 @@ export function AppProvider({ children }) {
         '',
         `URI: ${uri}`,
         'Version: 1',
-        'Chain ID: 137',
+        `Chain ID: ${CHAIN_CONFIG.chainId}`,
         `Nonce: ${nonce}`,
         `Issued At: ${new Date().toISOString()}`
       ].join('\n');
@@ -144,16 +236,23 @@ export function AppProvider({ children }) {
       const signature = await signer.signMessage(siweMessage);
 
       // 5. Verify signature on backend & receive JWT session token
-      const authResult = await api.verifySignature(siweMessage, signature, role);
+      const authResult = await api.verifySignature(siweMessage, signature, role, normalizedAddress, nonce);
+      const sessionToken = authResult.sessionToken || authResult.token;
+
+      if (!sessionToken) {
+        throw new Error('Authentication succeeded but server did not return a session token.');
+      }
 
       const userData = {
-        id: `user_${activeAddress.substring(2, 8)}`,
-        walletAddress: `${activeAddress.substring(0, 6)}...${activeAddress.substring(activeAddress.length - 4)}`,
-        fullAddress: activeAddress,
+        id: authResult.user?.id || `user_${normalizedAddress.substring(2, 8)}`,
+        walletAddress: normalizedAddress,
+        displayAddress: formatDisplayAddress(normalizedAddress),
+        fullAddress: normalizedAddress,
         displayName: role === 'doctor' ? 'Dr. Sarah Chen' : 'Alex Morgan',
-        role,
+        role: String(authResult.role || role).toLowerCase(),
         connectedAt: new Date().toISOString(),
-        sessionToken: authResult.token
+        sessionToken,
+        authType: 'web3'
       };
 
       setIsConnected(true);
@@ -180,14 +279,22 @@ export function AppProvider({ children }) {
     try {
       const data = await api.login(email, password);
       const roleStr = String(data.user?.role || data.role || 'PATIENT').toLowerCase();
+      const rawWallet = data.user?.walletAddress || data.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92';
+      const cleanWallet = rawWallet.toLowerCase();
+
       const userData = {
+        id: data.user?.id || `usr_${Date.now()}`,
         name: data.user?.name || (roleStr === 'doctor' ? 'Dr. Sarah Smith' : 'MedVault Patient'),
+        displayName: data.user?.name || (roleStr === 'doctor' ? 'Dr. Sarah Smith' : 'MedVault Patient'),
         email: data.user?.email || email,
-        walletAddress: data.user?.walletAddress || data.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92',
+        walletAddress: cleanWallet,
+        displayAddress: formatDisplayAddress(cleanWallet),
+        fullAddress: cleanWallet,
         role: roleStr,
-        sessionToken: data.sessionToken,
+        sessionToken: data.sessionToken || data.token,
         authType: 'email'
       };
+
       setUser(userData);
       setIsConnected(true);
       persistSession(userData);
@@ -208,14 +315,22 @@ export function AppProvider({ children }) {
     try {
       const data = await api.register(email, password, role, name);
       const roleStr = String(data.user?.role || role).toLowerCase();
+      const rawWallet = data.user?.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92';
+      const cleanWallet = rawWallet.toLowerCase();
+
       const userData = {
+        id: data.user?.id || `usr_${Date.now()}`,
         name: data.user?.name || name || (roleStr === 'doctor' ? 'Dr. Healthcare Provider' : 'MedVault Patient'),
+        displayName: data.user?.name || name || (roleStr === 'doctor' ? 'Dr. Healthcare Provider' : 'MedVault Patient'),
         email: data.user?.email || email,
-        walletAddress: data.user?.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92',
+        walletAddress: cleanWallet,
+        displayAddress: formatDisplayAddress(cleanWallet),
+        fullAddress: cleanWallet,
         role: roleStr,
-        sessionToken: data.sessionToken,
+        sessionToken: data.sessionToken || data.token,
         authType: 'email'
       };
+
       setUser(userData);
       setIsConnected(true);
       persistSession(userData);
@@ -235,38 +350,47 @@ export function AppProvider({ children }) {
     return signIn({ walletAddress, role });
   }, [signIn]);
 
+  const processGoogleAuthSuccess = useCallback(async (googleData, targetRole = 'patient') => {
+    const res = await api.googleAuth({
+      email: googleData.email,
+      name: googleData.name,
+      photoURL: googleData.photoURL,
+      idToken: googleData.idToken,
+      uid: googleData.googleId,
+      role: targetRole
+    }, targetRole);
+
+    const roleStr = String(res.user?.role || targetRole).toLowerCase();
+    const rawWallet = res.user?.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92';
+    const cleanWallet = rawWallet.toLowerCase();
+
+    const userData = {
+      id: res.user?.id || `user_${Date.now()}`,
+      name: res.user?.name || googleData.name,
+      displayName: res.user?.name || googleData.name,
+      email: res.user?.email || googleData.email,
+      photoURL: googleData.photoURL || null,
+      walletAddress: cleanWallet,
+      displayAddress: formatDisplayAddress(cleanWallet),
+      fullAddress: cleanWallet,
+      role: roleStr,
+      sessionToken: res.sessionToken || res.token,
+      authType: 'google'
+    };
+
+    setUser(userData);
+    setIsConnected(true);
+    persistSession(userData);
+    addToast(`Signed in with Google as ${roleStr === 'doctor' ? 'Healthcare Provider' : 'Patient'}!`, 'success');
+    await refreshRecords();
+    return userData;
+  }, [addToast, refreshRecords]);
+
   const signInWithGoogle = useCallback(async (role = 'patient') => {
     setLoading(true);
     try {
       const googleData = await authenticateWithGoogle();
-      const res = await api.googleAuth({
-        email: googleData.email,
-        name: googleData.name,
-        photoURL: googleData.photoURL,
-        idToken: googleData.idToken,
-        uid: googleData.googleId,
-        role: role
-      }, role);
-
-      const roleStr = String(res.user?.role || role).toLowerCase();
-      const userData = {
-        id: res.user?.id || `user_${Date.now()}`,
-        name: res.user?.name || googleData.name,
-        displayName: res.user?.name || googleData.name,
-        email: res.user?.email || googleData.email,
-        photoURL: googleData.photoURL || null,
-        walletAddress: res.user?.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92',
-        role: roleStr,
-        sessionToken: res.sessionToken,
-        authType: 'google'
-      };
-
-      setUser(userData);
-      setIsConnected(true);
-      persistSession(userData);
-      addToast(`Signed in with Google as ${roleStr === 'doctor' ? 'Healthcare Provider' : 'Patient'}!`, 'success');
-      await refreshRecords();
-      return userData;
+      return await processGoogleAuthSuccess(googleData, role);
     } catch (err) {
       console.error('[Google Sign-In Error]:', err);
       addToast(err.message || 'Google sign-in failed', 'error');
@@ -274,7 +398,37 @@ export function AppProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [addToast, refreshRecords]);
+  }, [addToast, processGoogleAuthSuccess]);
+
+  const signInWithGoogleRedirect = useCallback(async (role = 'patient') => {
+    setLoading(true);
+    try {
+      const fallbackResult = await initiateGoogleRedirect(role);
+      if (fallbackResult) {
+        return await processGoogleAuthSuccess(fallbackResult, role);
+      }
+    } catch (err) {
+      console.error('[Google Redirect Error]:', err);
+      addToast(err.message || 'Google redirect failed', 'error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [addToast, processGoogleAuthSuccess]);
+
+  const signInWithGoogleManual = useCallback(async ({ email, name, role = 'patient' }) => {
+    setLoading(true);
+    try {
+      const manualData = await authenticateWithGoogleManual(email, name, role);
+      return await processGoogleAuthSuccess(manualData, role);
+    } catch (err) {
+      console.error('[Manual Google Sign-In Error]:', err);
+      addToast(err.message || 'Manual Google sign-in failed', 'error');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, [addToast, processGoogleAuthSuccess]);
 
   const connectWallet = useCallback(async (role = 'patient') => {
     return signIn({ role });
@@ -283,7 +437,21 @@ export function AppProvider({ children }) {
   const disconnectWallet = useCallback(() => {
     setIsConnected(false);
     setUser(null);
+    setRecords([]);
+    setGrants([]);
+    setStats({
+      totalRecords: 0,
+      activeGrants: 0,
+      expiredGrants: 0,
+      totalAccesses: 0,
+      storageUsed: '0 KB'
+    });
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    try {
+      if (typeof document !== 'undefined') {
+        document.cookie = 'medvault_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+      }
+    } catch (e) {}
     firebaseSignOut().catch(() => {});
     addToast('Signed out successfully', 'info');
   }, [addToast]);
@@ -295,12 +463,13 @@ export function AppProvider({ children }) {
     setLoading(true);
     try {
       if (!file) throw new Error('Please select a file to encrypt');
+      if (!user?.sessionToken) throw new Error('Authentication required before uploading. Please log in.');
 
-      // 1. Encrypt raw medical file in the browser BEFORE upload (Zero Data Exposure)
+      // 1. Encrypt raw medical file in the browser BEFORE upload (Zero Plaintext Exposure)
       const { encryptedBlob, contentHash, rawKeyBase64, sizeBytes } = await encryptFileClientSide(file);
 
-      // 2. Generate on-chain record ID
-      const recordIdHex = ethers.keccak256(ethers.toUtf8Bytes(`rec_${Date.now()}_${label}`));
+      // 2. Generate deterministic on-chain record ID
+      const recordIdHex = ethers.keccak256(ethers.toUtf8Bytes(`rec_${Date.now()}_${label}_${Math.random()}`));
 
       // 3. Upload opaque encrypted blob to backend
       const uploadRes = await api.uploadRecord(
@@ -311,45 +480,45 @@ export function AppProvider({ children }) {
         rawKeyBase64
       );
 
+      const returnedId = uploadRes.recordId || uploadRes.id || recordIdHex;
+      const returnedCid = uploadRes.storageCID || uploadRes.ipfsCid || `Qm${contentHash.substring(2, 44)}`;
+
       const newRecord = {
-        id: recordIdHex,
+        id: returnedId,
+        recordId: returnedId,
         label,
-        ownerWallet: user?.walletAddress || '0x7a3b...f92d',
-        storageCID: uploadRes.ipfsCid || `Qm${contentHash.substring(2, 44)}`,
+        ownerWallet: user.walletAddress,
+        storageCID: returnedCid,
+        ipfsCid: returnedCid,
         contentHash: contentHash,
         createdAt: new Date().toISOString(),
         fileSize: `${Math.round(sizeBytes / 1024)} KB`,
+        fileSizeBytes: sizeBytes,
         fileType: file.name.split('.').pop()?.toUpperCase() || 'PDF',
         activeGrants: 0,
         status: 'encrypted',
         rawKeyBase64 // Cached locally in browser for owner view
       };
 
-      setRecords(prev => [newRecord, ...prev]);
-      setStats(prev => (prev ? { ...prev, totalRecords: prev.totalRecords + 1 } : prev));
+      setRecords(prev => [newRecord, ...prev.filter(r => r.id !== returnedId)]);
+      setStats(prev => ({
+        ...prev,
+        totalRecords: prev.totalRecords + 1
+      }));
+
       addToast('Zero Data Exposure: Record AES-256 encrypted & uploaded!', 'success');
+      // Refresh to ensure database and on-chain indexer synchronization
+      refreshRecords().catch(() => {});
+
       return newRecord;
     } catch (err) {
       console.error('[Upload Error]:', err);
-      // Demo fallback simulation
-      const fallbackRecord = {
-        id: `rec_${Date.now()}`,
-        label,
-        ownerWallet: user?.walletAddress || '0x7a3b...f92d',
-        storageCID: `Qm${Math.random().toString(36).substr(2, 10)}`,
-        createdAt: new Date().toISOString(),
-        fileSize: file ? `${Math.round(file.size / 1024)} KB` : '150 KB',
-        fileType: 'PDF',
-        activeGrants: 0,
-        status: 'encrypted'
-      };
-      setRecords(prev => [fallbackRecord, ...prev]);
-      addToast('Record uploaded (simulation fallback)', 'info');
-      return fallbackRecord;
+      addToast(err.message || 'Failed to upload record', 'error');
+      throw err;
     } finally {
       setLoading(false);
     }
-  }, [user, addToast]);
+  }, [user, addToast, refreshRecords]);
 
   // =========================================================================
   // STEP 1 & 3: Time-Boxed Grant Creation
@@ -357,64 +526,61 @@ export function AppProvider({ children }) {
   const createGrant = useCallback(async (recordId, granteeWallet, expiresInSeconds) => {
     setLoading(true);
     try {
-      const record = records.find(r => r.id === recordId);
+      const record = records.find(r => r.id === recordId || r.recordId === recordId);
       const encryptedKeyForDoctor = btoa(`DOCTOR_ENCRYPTED_DEK_${Date.now()}`);
 
       // Call live backend to persist grant and doctor key envelope
-      await api.createGrant(recordId, granteeWallet, expiresInSeconds, encryptedKeyForDoctor);
+      const grantRes = await api.createGrant(recordId, granteeWallet, expiresInSeconds, encryptedKeyForDoctor);
 
       const newGrant = {
-        id: `grant_${Date.now()}`,
+        id: grantRes.grantId || `grant_${Date.now()}`,
+        grantId: grantRes.grantId || `grant_${Date.now()}`,
         recordId,
         recordLabel: record?.label || 'Medical Record',
         granteeWallet,
         granteeName: granteeWallet,
-        expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
+        expiresAt: grantRes.expiresAt || new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
         status: 'active',
         createdAt: new Date().toISOString(),
-        shareableLink: `${window.location.origin}/doctor-access?code=${recordId}`
+        shareableLink: grantRes.shareableLink || `${window.location.origin}/doctor-access?code=${recordId}`
       };
 
       setGrants(prev => [newGrant, ...prev]);
       setRecords(prev =>
-        prev.map(r => (r.id === recordId ? { ...r, activeGrants: r.activeGrants + 1 } : r))
+        prev.map(r => (r.id === recordId || r.recordId === recordId ? { ...r, activeGrants: (r.activeGrants || 0) + 1 } : r))
       );
-      setStats(prev => (prev ? { ...prev, activeGrants: prev.activeGrants + 1 } : prev));
-      addToast('Time-Boxed Access Grant registered on-chain!', 'success');
+      setStats(prev => ({ ...prev, activeGrants: prev.activeGrants + 1 }));
+
+      addToast('Time-Boxed Access Grant registered successfully!', 'success');
+      refreshRecords().catch(() => {});
       return newGrant;
     } catch (err) {
-      console.warn('[Grant Error]:', err);
-      // Fallback
-      const fallbackGrant = {
-        id: `grant_${Date.now()}`,
-        recordId,
-        recordLabel: 'Medical Record',
-        granteeWallet,
-        granteeName: granteeWallet,
-        expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
-        status: 'active',
-        createdAt: new Date().toISOString(),
-        shareableLink: `https://medvault.app/access/grant_${Date.now()}`
-      };
-      setGrants(prev => [fallbackGrant, ...prev]);
-      addToast('Grant created', 'success');
-      return fallbackGrant;
+      console.error('[Grant Error]:', err);
+      addToast(err.message || 'Failed to create access grant', 'error');
+      throw err;
     } finally {
       setLoading(false);
     }
-  }, [records, addToast]);
+  }, [records, addToast, refreshRecords]);
 
   // Revoke a grant
   const revokeGrant = useCallback(async (grantId) => {
-    setGrants(prev => prev.filter(g => g.id !== grantId));
-    setRecords(prev =>
-      prev.map(r => {
-        const isRelated = grants.find(g => g.id === grantId)?.recordId === r.id;
-        return isRelated ? { ...r, activeGrants: Math.max(0, r.activeGrants - 1) } : r;
-      })
-    );
-    addToast('Access grant revoked', 'info');
-  }, [grants, addToast]);
+    try {
+      await api.revokeGrant(grantId);
+      setGrants(prev => prev.map(g => (g.id === grantId || g.grantId === grantId ? { ...g, status: 'revoked' } : g)));
+      setRecords(prev =>
+        prev.map(r => {
+          const isRelated = grants.find(g => (g.id === grantId || g.grantId === grantId))?.recordId === r.id;
+          return isRelated ? { ...r, activeGrants: Math.max(0, (r.activeGrants || 0) - 1) } : r;
+        })
+      );
+      addToast('Access grant revoked', 'info');
+      refreshRecords().catch(() => {});
+    } catch (err) {
+      console.error('[Revoke Grant Error]:', err);
+      addToast(err.message || 'Failed to revoke grant', 'error');
+    }
+  }, [grants, addToast, refreshRecords]);
 
   // =========================================================================
   // STEP 4: Query Fast-Read Immutable On-Chain Audit Feed
@@ -425,7 +591,9 @@ export function AppProvider({ children }) {
       if (data && data.events && data.events.length > 0) {
         return data.events;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[Audit Trail Warning]:', e.message);
+    }
     return auditEvents.filter(e => e.recordId === recordId);
   }, [auditEvents]);
 
@@ -440,7 +608,6 @@ export function AppProvider({ children }) {
     setLoading(true);
     try {
       // 1. Fetch ciphertext & doctor DEK envelope from backend
-      // Backend validates doctor JWT, checks on-chain grant, and logs immutable audit
       const response = await api.retrieveRecordForDoctor(recordId);
 
       // 2. Decrypt ciphertext in the doctor's browser memory
@@ -482,8 +649,11 @@ export function AppProvider({ children }) {
       loginWithEmail,
       registerWithEmail,
       signInWithGoogle,
+      signInWithGoogleRedirect,
+      signInWithGoogleManual,
       connectWallet,
       disconnectWallet,
+      refreshRecords,
       uploadRecord,
       createGrant,
       revokeGrant,

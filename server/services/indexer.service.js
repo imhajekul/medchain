@@ -25,7 +25,8 @@ export class BlockchainIndexer {
     }
 
     try {
-      this.provider = new ethers.JsonRpcProvider(this.rpcUrl);
+      const amoyNetwork = ethers.Network.from({ name: 'polygon-amoy', chainId: 80002 });
+      this.provider = new ethers.JsonRpcProvider(this.rpcUrl, amoyNetwork, { staticNetwork: true });
       this.contract = new ethers.Contract(this.contractAddress, MEDVAULT_ACCESS_ABI, this.provider);
       this.isRunning = true;
       console.log(`⚡ Blockchain Indexer connected to ${this.rpcUrl} watching contract: ${this.contractAddress}`);
@@ -50,13 +51,20 @@ export class BlockchainIndexer {
   }
 
   async pollLoop() {
+    let failureCount = 0;
     while (this.isRunning) {
       try {
         await this.syncNewBlocks();
+        failureCount = 0;
+        await new Promise(r => setTimeout(r, 6000));
       } catch (err) {
-        console.error('[Indexer Poll Error]:', err.message);
+        failureCount++;
+        const backoff = Math.min(30000, 5000 * failureCount);
+        if (failureCount <= 2 || failureCount % 10 === 0) {
+          console.warn(`[Indexer Poll Notice]: ${err.message}. Retrying in ${backoff / 1000}s...`);
+        }
+        await new Promise(r => setTimeout(r, backoff));
       }
-      await new Promise(r => setTimeout(r, 6000));
     }
   }
 

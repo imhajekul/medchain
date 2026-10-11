@@ -13,7 +13,7 @@ if (process.env.RPC_URL && process.env.RELAYER_PRIVATE_KEY && process.env.CONTRA
   try {
     const rawKey = String(process.env.RELAYER_PRIVATE_KEY).trim();
     if (rawKey && (rawKey.length === 64 || rawKey.length === 66) && !rawKey.includes('your_relayer') && !rawKey.includes('0x0000')) {
-      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, 80002, { staticNetwork: true });
       relayerWallet = new ethers.Wallet(rawKey, provider);
       if (ethers.isAddress(process.env.CONTRACT_ADDRESS)) {
         medVaultContract = new ethers.Contract(process.env.CONTRACT_ADDRESS, MEDVAULT_ACCESS_ABI, relayerWallet);
@@ -36,7 +36,10 @@ if (process.env.RPC_URL && process.env.RELAYER_PRIVATE_KEY && process.env.CONTRA
 export async function createGrant(req, res) {
   try {
     const user = req.user;
-    const { recordId, granteeWallet, expiresInSeconds, encryptedKeyMaterial } = req.body;
+    const recordId = req.body.recordId || req.body.recordIdHex;
+    const granteeWallet = req.body.granteeWallet || req.body.doctorAddress;
+    const expiresInSeconds = req.body.expiresInSeconds;
+    const encryptedKeyMaterial = req.body.encryptedKeyMaterial || req.body.encryptedKeyForDoctor;
 
     if (!recordId || !granteeWallet || !expiresInSeconds) {
       return res.status(400).json({
@@ -312,3 +315,67 @@ export async function revokeGrantEarly(req, res) {
     return res.status(500).json({ error: 'Failed to revoke grant' });
   }
 }
+
+/**
+ * GET /grants
+ * Lists active and historical grants related to the authenticated caller (as patient or doctor).
+ */
+export async function listGrants(req, res) {
+  try {
+    const user = req.user;
+    if (!user || !user.walletAddress) {
+      return res.status(401).json({ error: 'Unauthorized: Missing session wallet.' });
+    }
+
+    const callerWallet = user.walletAddress.toLowerCase();
+    const result = await db.query(
+      `SELECT g.grant_id_hex as "id",
+              g.grant_id_hex as "grantId",
+              g.record_id_hex as "recordId",
+              g.owner_address as "ownerWallet",
+              g.grantee_address as "granteeWallet",
+              g.valid_from as "validFrom",
+              g.valid_to as "expiresAt",
+              g.is_revoked as "isRevoked",
+              g.created_at as "createdAt",
+              r.label as "recordLabel"
+       FROM access_grants g
+       LEFT JOIN records r ON r.record_id_hex = g.record_id_hex
+       WHERE LOWER(g.owner_address) = LOWER($1) OR LOWER(g.grantee_address) = LOWER($1)
+       ORDER BY g.created_at DESC`,
+      [callerWallet]
+    );
+
+    const now = new Date();
+    const grants = (result.rows || []).map(g => {
+      const expiresAt = new Date(g.expiresAt || g.valid_to);
+      let status = 'active';
+      if (g.isRevoked || g.is_revoked) {
+        status = 'revoked';
+      } else if (now > expiresAt) {
+        status = 'expired';
+      }
+
+      return {
+        id: g.id || g.grantId || g.grant_id_hex,
+        grantId: g.grantId || g.id || g.grant_id_hex,
+        recordId: g.recordId || g.record_id_hex,
+        recordLabel: g.recordLabel || 'Medical Record',
+        granteeWallet: g.granteeWallet || g.grantee_address,
+        granteeName: g.granteeWallet || g.grantee_address,
+        ownerWallet: g.ownerWallet || g.owner_address,
+        validFrom: g.validFrom || g.valid_from,
+        expiresAt: expiresAt.toISOString(),
+        status,
+        createdAt: g.createdAt || g.created_at || now.toISOString(),
+        shareableLink: `https://medvault.app/access/${g.grantId || g.id}`
+      };
+    });
+
+    return res.status(200).json({ grants });
+  } catch (err) {
+    console.error('[List Grants Error]:', err);
+    return res.status(500).json({ error: 'Failed to retrieve access grants' });
+  }
+}
+

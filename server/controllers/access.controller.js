@@ -15,7 +15,7 @@ if (process.env.RPC_URL && process.env.RELAYER_PRIVATE_KEY && process.env.PERMIS
   try {
     const rawKey = String(process.env.RELAYER_PRIVATE_KEY).trim();
     if (rawKey && (rawKey.length === 64 || rawKey.length === 66) && !rawKey.includes('your_relayer') && !rawKey.includes('0x0000')) {
-      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL, 80002, { staticNetwork: true });
       relayerWallet = new ethers.Wallet(rawKey, provider);
       if (ethers.isAddress(process.env.PERMISSIONS_VAULT_ADDRESS)) {
         permissionsContract = new ethers.Contract(
