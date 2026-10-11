@@ -4,7 +4,7 @@ import {
   Shield, Menu, X, LogOut, User, ChevronDown,
   LayoutDashboard, Upload, Stethoscope, Heart,
   Activity, FileText, Settings, HelpCircle, Bell, Home,
-  Moon, Sun, Bot, Database, Sparkles
+  Moon, Sun, Bot, Wallet as WalletIcon, Sparkles
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
@@ -56,13 +56,13 @@ export default function Navbar() {
     : isPatient
       ? [
           { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard size={16} /> },
-          { path: '/database', label: 'Database', icon: <Database size={16} /> },
+          { path: '/wallet', label: 'Wallet', icon: <WalletIcon size={16} /> },
           { path: '/assistant', label: 'AI Copilot', icon: <Bot size={16} /> },
           { path: '/upload', label: 'Upload', icon: <Upload size={16} /> },
         ]
       : [
           { path: '/doctor-access', label: 'Doctor Portal', icon: <FileText size={16} /> },
-          { path: '/database', label: 'Database', icon: <Database size={16} /> },
+          { path: '/wallet', label: 'Wallet', icon: <WalletIcon size={16} /> },
           { path: '/assistant', label: 'AI Copilot', icon: <Bot size={16} /> },
         ];
 
@@ -198,8 +198,8 @@ export default function Navbar() {
                         <Link to="/assistant" className="navbar-dropdown-item" onClick={() => setProfileOpen(false)}>
                           <Bot size={16} /> AI Health Copilot
                         </Link>
-                        <Link to="/database" className="navbar-dropdown-item" onClick={() => setProfileOpen(false)}>
-                          <Database size={16} /> Cluster Explorer
+                        <Link to="/wallet" className="navbar-dropdown-item" onClick={() => setProfileOpen(false)}>
+                          <WalletIcon size={16} /> My Sovereign Wallet
                         </Link>
                         <button
                           type="button"

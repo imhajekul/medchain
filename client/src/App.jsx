@@ -11,7 +11,7 @@ import UploadRecord from './pages/UploadRecord';
 import RecordDetail from './pages/RecordDetail';
 import DoctorAccess from './pages/DoctorAccess';
 import AiAssistant from './pages/AiAssistant';
-import DatabaseViewer from './pages/DatabaseViewer';
+import Wallet from './pages/Wallet';
 import AiAssistantWidget from './components/shared/AiAssistantWidget';
 import NotFound from './pages/NotFound';
 
@@ -136,9 +136,9 @@ function AnimatedRoutes() {
             <PageTransition><AiAssistant /></PageTransition>
           </AuthenticatedRoute>
         } />
-        <Route path="/database" element={
+        <Route path="/wallet" element={
           <AuthenticatedRoute>
-            <PageTransition><DatabaseViewer /></PageTransition>
+            <PageTransition><Wallet /></PageTransition>
           </AuthenticatedRoute>
         } />
         <Route path="*" element={
