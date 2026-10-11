@@ -108,6 +108,58 @@ export function AppProvider({ children }) {
     }
   }, []);
 
+  // Persist session in localStorage and cookies
+  const persistSession = useCallback((userData) => {
+    const normalized = {
+      ...userData,
+      sessionToken: userData.sessionToken || userData.token,
+      walletAddress: (userData.walletAddress || '').toLowerCase(),
+      displayAddress: formatDisplayAddress(userData.walletAddress)
+    };
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalized));
+    try {
+      if (typeof document !== 'undefined') {
+        document.cookie = `medvault_token=${encodeURIComponent(normalized.sessionToken)}; path=/; max-age=604800; SameSite=Lax`;
+      }
+    } catch (e) {}
+  }, []);
+
+  const processGoogleAuthSuccess = useCallback(async (googleData, targetRole = 'patient') => {
+    const res = await api.googleAuth({
+      email: googleData.email,
+      name: googleData.name,
+      photoURL: googleData.photoURL,
+      idToken: googleData.idToken,
+      uid: googleData.googleId,
+      role: targetRole
+    }, targetRole);
+
+    const roleStr = String(res.user?.role || targetRole).toLowerCase();
+    const rawWallet = res.user?.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92';
+    const cleanWallet = rawWallet.toLowerCase();
+
+    const userData = {
+      id: res.user?.id || `user_${Date.now()}`,
+      name: res.user?.name || googleData.name,
+      displayName: res.user?.name || googleData.name,
+      email: res.user?.email || googleData.email,
+      photoURL: googleData.photoURL || null,
+      walletAddress: cleanWallet,
+      displayAddress: formatDisplayAddress(cleanWallet),
+      fullAddress: cleanWallet,
+      role: roleStr,
+      sessionToken: res.sessionToken || res.token,
+      authType: 'google'
+    };
+
+    setUser(userData);
+    setIsConnected(true);
+    persistSession(userData);
+    addToast(`Signed in with Google as ${roleStr === 'doctor' ? 'Healthcare Provider' : 'Patient'}!`, 'success');
+    await refreshRecords();
+    return userData;
+  }, [addToast, persistSession, refreshRecords]);
+
   // Restore session on mount
   useEffect(() => {
     const saved = localStorage.getItem(AUTH_STORAGE_KEY);
@@ -160,21 +212,7 @@ export function AppProvider({ children }) {
     }
   }, [addToast]);
 
-  // Persist session in localStorage and cookies
-  const persistSession = (userData) => {
-    const normalized = {
-      ...userData,
-      sessionToken: userData.sessionToken || userData.token,
-      walletAddress: (userData.walletAddress || '').toLowerCase(),
-      displayAddress: formatDisplayAddress(userData.walletAddress)
-    };
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(normalized));
-    try {
-      if (typeof document !== 'undefined') {
-        document.cookie = `medvault_token=${encodeURIComponent(normalized.sessionToken)}; path=/; max-age=604800; SameSite=Lax`;
-      }
-    } catch (e) {}
-  };
+
 
   // =========================================================================
   // STEP 2: Web3 Authentication via SIWE & Cryptographic Signatures
@@ -350,41 +388,7 @@ export function AppProvider({ children }) {
     return signIn({ walletAddress, role });
   }, [signIn]);
 
-  const processGoogleAuthSuccess = useCallback(async (googleData, targetRole = 'patient') => {
-    const res = await api.googleAuth({
-      email: googleData.email,
-      name: googleData.name,
-      photoURL: googleData.photoURL,
-      idToken: googleData.idToken,
-      uid: googleData.googleId,
-      role: targetRole
-    }, targetRole);
 
-    const roleStr = String(res.user?.role || targetRole).toLowerCase();
-    const rawWallet = res.user?.walletAddress || '0x7a3b68f123456789abcdef0123456789abcdef92';
-    const cleanWallet = rawWallet.toLowerCase();
-
-    const userData = {
-      id: res.user?.id || `user_${Date.now()}`,
-      name: res.user?.name || googleData.name,
-      displayName: res.user?.name || googleData.name,
-      email: res.user?.email || googleData.email,
-      photoURL: googleData.photoURL || null,
-      walletAddress: cleanWallet,
-      displayAddress: formatDisplayAddress(cleanWallet),
-      fullAddress: cleanWallet,
-      role: roleStr,
-      sessionToken: res.sessionToken || res.token,
-      authType: 'google'
-    };
-
-    setUser(userData);
-    setIsConnected(true);
-    persistSession(userData);
-    addToast(`Signed in with Google as ${roleStr === 'doctor' ? 'Healthcare Provider' : 'Patient'}!`, 'success');
-    await refreshRecords();
-    return userData;
-  }, [addToast, refreshRecords]);
 
   const signInWithGoogle = useCallback(async (role = 'patient') => {
     setLoading(true);

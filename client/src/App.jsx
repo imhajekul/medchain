@@ -39,7 +39,13 @@ function PageTransition({ children }) {
 // Protected route — redirects to /auth if not signed in, and ensures Doctor vs Patient separation
 function PatientRoute({ children }) {
   const { isConnected, authLoading, user } = useApp();
-  if (authLoading) return null; // wait for session restore
+  if (authLoading) {
+    return (
+      <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--color-primary, #6366f1)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      </div>
+    );
+  }
   if (!isConnected) return <Navigate to="/auth?mode=signin&role=patient" replace />;
   if (user?.role === 'doctor') return <Navigate to="/doctor-access" replace />;
   return children;
@@ -48,7 +54,13 @@ function PatientRoute({ children }) {
 // Guest-only route — redirects to appropriate role portal if already signed in
 function GuestRoute({ children }) {
   const { isConnected, authLoading, user } = useApp();
-  if (authLoading) return null;
+  if (authLoading) {
+    return (
+      <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--color-primary, #6366f1)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      </div>
+    );
+  }
   if (isConnected) {
     return <Navigate to={user?.role === 'doctor' ? '/doctor-access' : '/dashboard'} replace />;
   }
@@ -105,30 +117,32 @@ function AnimatedRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AppProvider>
-        <Navbar />
-        <ErrorBoundary>
-          <AnimatedRoutes />
-        </ErrorBoundary>
-        <ToastContainer />
-        <AiAssistantWidget />
-        <div 
-          style={{
-            position: 'fixed',
-            top: 0, left: 0, right: 0, bottom: 0,
-            backgroundImage: 'url(/xvivo-hero.jpg)',
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            backgroundAttachment: 'fixed',
-            zIndex: -2,
-            opacity: 0.3,
-            filter: 'contrast(1.2)'
-          }} 
-        />
-        <div className="bg-orb bg-orb-1" />
-        <div className="bg-orb bg-orb-2" />
-        <div className="bg-orb bg-orb-3" />
-      </AppProvider>
+      <ErrorBoundary title="MedVault App Error">
+        <AppProvider>
+          <Navbar />
+          <ErrorBoundary>
+            <AnimatedRoutes />
+          </ErrorBoundary>
+          <ToastContainer />
+          <AiAssistantWidget />
+          <div 
+            style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              backgroundImage: 'url(/xvivo-hero.jpg)',
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundAttachment: 'fixed',
+              zIndex: -2,
+              opacity: 0.3,
+              filter: 'contrast(1.2)'
+            }} 
+          />
+          <div className="bg-orb bg-orb-1" />
+          <div className="bg-orb bg-orb-2" />
+          <div className="bg-orb bg-orb-3" />
+        </AppProvider>
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }
