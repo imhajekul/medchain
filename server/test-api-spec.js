@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import crypto from 'crypto';
 
 const BASE_URL = 'http://localhost:3001';
 
@@ -310,11 +311,125 @@ async function runApiSpecTests() {
     headers: { Authorization: `Bearer ${intruderToken}` }
   });
   if (intruderAuditRes.status === 403) {
-    console.log('   ✅ Audit Confidentiality: Non-owner audit query rejected with HTTP 403.');
+    console.log('   ✅ Audit Confidentiality: Non-owner audit query rejected with HTTP 403.\n');
   }
 
+  // ===========================================================================
+  // Step 7: Razorpay UPI Order Creation & HMAC-SHA256 Webhook Verification
+  // ===========================================================================
+  console.log('➡️ [Step 7] Testing Razorpay UPI Payment Flow & Webhook Verification...');
+
+  // 7a. POST /api/payment/create-order
+  const orderRes = await fetch(`${BASE_URL}/api/payment/create-order`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${patientToken}`
+    },
+    body: JSON.stringify({
+      walletAddress: patient.address,
+      userId: 'usr_patient_test',
+      amount: 50
+    })
+  });
+
+  const orderData = await orderRes.json();
+  if (!orderData.orderId || orderData.amount !== 5000) {
+    throw new Error(`Order creation failed: ${JSON.stringify(orderData)}`);
+  }
+  console.log(`   ✅ POST /api/payment/create-order: Created order ${orderData.orderId} (₹50 / 5000 paise).`);
+
+  // 7b. GET /api/payment/status (Pending verification)
+  const statusRes1 = await fetch(`${BASE_URL}/api/payment/status?orderId=${orderData.orderId}`);
+  const statusData1 = await statusRes1.json();
+  if (statusData1.status !== 'pending' || statusData1.confirmed !== false) {
+    throw new Error(`Expected pending payment status, got: ${JSON.stringify(statusData1)}`);
+  }
+  console.log(`   ✅ GET /api/payment/status: Order status correctly reflects "pending".`);
+
+  // 7c. Webhook Signature Verification & Idempotent Credit
+  const mockPaymentId = `pay_test_${Date.now()}`;
+  const webhookPayload = {
+    event: 'payment.captured',
+    payload: {
+      payment: {
+        entity: {
+          id: mockPaymentId,
+          order_id: orderData.orderId,
+          amount: 5000,
+          currency: 'INR',
+          status: 'captured',
+          notes: {
+            walletAddress: patient.address,
+            userId: 'usr_patient_test',
+            tokenCredit: '0.1'
+          }
+        }
+      }
+    }
+  };
+
+  const webhookBodyStr = JSON.stringify(webhookPayload);
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || '';
+  const validSignature = webhookSecret
+    ? crypto.createHmac('sha256', webhookSecret).update(Buffer.from(webhookBodyStr)).digest('hex')
+    : 'mock_valid_sig';
+
+  // Test invalid webhook signature rejected (when secret configured)
+  if (webhookSecret) {
+    const invalidWebhookRes = await fetch(`${BASE_URL}/api/payment/webhook`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-razorpay-signature': 'invalid_signature_hex'
+      },
+      body: webhookBodyStr
+    });
+    if (invalidWebhookRes.status === 400) {
+      console.log('   ✅ Webhook Security: Invalid HMAC-SHA256 signature rejected with HTTP 400.');
+    }
+  }
+
+  // Send legitimate webhook event
+  const webhookRes = await fetch(`${BASE_URL}/api/payment/webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-razorpay-signature': validSignature
+    },
+    body: webhookBodyStr
+  });
+  const webhookResData = await webhookRes.json();
+  if (webhookResData.status !== 'ok') {
+    throw new Error(`Webhook processing failed: ${JSON.stringify(webhookResData)}`);
+  }
+  console.log(`   ✅ POST /api/payment/webhook: Processed payment.captured and credited vault balance.`);
+
+  // 7d. Verify Idempotency (duplicate webhook calls must not double-credit)
+  const replayWebhookRes = await fetch(`${BASE_URL}/api/payment/webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-razorpay-signature': validSignature
+    },
+    body: webhookBodyStr
+  });
+  const replayWebhookData = await replayWebhookRes.json();
+  if (replayWebhookData.message !== 'Already processed') {
+    throw new Error(`Idempotency check failed: ${JSON.stringify(replayWebhookData)}`);
+  }
+  console.log(`   ✅ Webhook Idempotency: Duplicate payment event safely ignored without double-credit.`);
+
+  // 7e. GET /api/payment/status (Confirmed verification)
+  const statusRes2 = await fetch(`${BASE_URL}/api/payment/status?orderId=${orderData.orderId}`);
+  const statusData2 = await statusRes2.json();
+  if (statusData2.status !== 'confirmed' || statusData2.confirmed !== true) {
+    throw new Error(`Expected confirmed status, got: ${JSON.stringify(statusData2)}`);
+  }
+  console.log(`   ✅ GET /api/payment/status: Order status updated to "confirmed" with paymentId.`);
+
   console.log('\n================================================================');
-  console.log('🎉 ALL SYSTEM COMPONENTS (STEPS 1 TO 6) FULLY VERIFIED & WORKING!');
+  console.log('🎉 ALL SYSTEM COMPONENTS (STEPS 1 TO 7) FULLY VERIFIED & WORKING!');
   console.log('================================================================\n');
 }
 

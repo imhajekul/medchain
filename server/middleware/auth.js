@@ -137,3 +137,26 @@ export function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Unauthorized: Session token is expired or invalid.' });
   }
 }
+
+/**
+ * Middleware: Optionally extracts verified identity if Bearer JWT is present.
+ */
+export function optionalAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      req.user = {
+        walletAddress: (decoded.walletAddress || '').toLowerCase(),
+        role: decoded.role || 'PATIENT',
+        email: decoded.email || null,
+        name: decoded.name || null,
+        id: decoded.id || null
+      };
+    } catch (err) {
+      // Ignore token decode failure in optionalAuth
+    }
+  }
+  next();
+}

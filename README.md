@@ -246,9 +246,10 @@ To issue a time-boxed access grant to another user or doctor, the user must pay 
 ```
 
 ### Endpoints
-- **`POST /api/payments/razorpay/create-order`**: Generates a Razorpay order for UPI checkout and records it in `payments` collection.
-- **`POST /api/payments/razorpay/verify`**: Verifies the HMAC-SHA256 signature (`razorpay_order_id|razorpay_payment_id`) and credits the user's `wallet_balance` in `users`.
-- **`POST /api/payments/razorpay/webhook`**: Listens for Razorpay `payment.captured` and `order.paid` events, validates `x-razorpay-signature` against `RAZORPAY_WEBHOOK_SECRET`, and automatically credits the user's wallet balance in MongoDB.
+- **`POST /api/payment/create-order`** (also `/api/payments/razorpay/create-order`): Creates a Razorpay order with notes (`walletAddress`, `userId`, `tokenCredit`), saves initial `"pending"` payment in MongoDB (`payments` & `audit_logs`), and returns `{ orderId, amount, currency, keyId }`.
+- **`POST /api/payment/webhook`** (also `/api/payments/razorpay/webhook`, `/api/webhooks/razorpay`): Validates HMAC-SHA256 signature against raw request buffer using `RAZORPAY_WEBHOOK_SECRET`. Handles `payment.captured` & `order.paid`, performs idempotency check, updates status to `"confirmed"`, atomically increments `wallet_balance` and `vaultBalance` in MongoDB, and records verified event in `audit_logs` with transaction ID and note `"Received via UPI (Razorpay Verified)"`.
+- **`GET /api/payment/status?orderId=...`**: Polling endpoint returning `{ orderId, status, paymentId, amountInr, polAmount, confirmed }` for frontend webhook settlement detection.
+- **`POST /api/payment/verify`**: Verifies HMAC-SHA256 client signature (`razorpay_order_id|razorpay_payment_id`).
 - **`GET /api/wallet/balance`**: Returns live balance and recent transactions from MongoDB Atlas.
 - **`POST /api/grants`**: Verifies minimum wallet balance ($\ge 0.10\text{ POL}$), debits the fee, records the grant in `access_grants`, and saves the audit log.
 
@@ -287,10 +288,11 @@ Create a `.env` file in the root or `server/` directory:
 MONGODB_URI=mongodb+srv://<user>:<password>@cluster0.mongodb.net/medvault?retryWrites=true&w=majority
 MONGODB_DB_NAME=medvault
 
-# Razorpay UPI Integration (Test or Live)
-RAZORPAY_KEY_ID=rzp_test_medvault
+# Razorpay UPI Integration & Webhook Verification (HMAC-SHA256)
+RAZORPAY_KEY_ID=rzp_test_your_key_id
 RAZORPAY_KEY_SECRET=your_razorpay_secret
 RAZORPAY_WEBHOOK_SECRET=your_razorpay_webhook_secret
+NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_test_your_key_id
 
 # Polygon Amoy & JWT
 RPC_URL=https://rpc-amoy.polygon.technology

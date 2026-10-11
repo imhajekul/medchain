@@ -409,7 +409,7 @@ class MongoDatabase {
     await this.users.updateOne(
       { wallet_address: wallet },
       {
-        $inc: { wallet_balance: polAmount },
+        $inc: { wallet_balance: polAmount, vaultBalance: polAmount },
         $setOnInsert: {
           id: `usr_${Date.now()}`,
           email: details.email || `${wallet.substring(0, 8)}@medvault.user`,
@@ -433,9 +433,9 @@ class MongoDatabase {
       currency: details.currency || 'POL',
       payment_id: details.paymentId || null,
       order_id: details.orderId || null,
-      method: details.method || 'Razorpay UPI Gateway',
-      description: details.description || `Wallet top-up via UPI (${polAmount} POL)`,
-      status: 'COMPLETED',
+      method: details.method || 'Received via UPI (Razorpay Verified)',
+      description: details.description || `Received via UPI (Razorpay Verified) • ${polAmount} POL (₹${details.amountInr || Math.round(polAmount * 500)})`,
+      status: 'confirmed',
       created_at: new Date()
     };
     await this.wallet_transactions.insertOne(tx);
@@ -443,8 +443,8 @@ class MongoDatabase {
     await this.audit_logs.insertOne({
       id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 4)}`,
       actor_address: wallet,
-      action_type: 'WALLET_CREDIT',
-      context: `Credited ${polAmount} POL via UPI Razorpay (Tx: ${tx.id})`,
+      action_type: 'PAYMENT_CONFIRMED',
+      context: details.description || `Received via UPI (Razorpay Verified) • ${polAmount} POL (Tx: ${tx.payment_id || tx.id})`,
       block_number: 14221060,
       tx_hash: details.paymentId || `0xpay_${Date.now().toString(16)}`,
       log_index: 0,
@@ -458,6 +458,22 @@ class MongoDatabase {
       newBalance: Number((updatedUser?.wallet_balance || 0).toFixed(4)),
       transaction: tx
     };
+  }
+
+  async logAuditEvent(eventData) {
+    const entry = {
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      actor_address: String(eventData.actorAddress || eventData.walletAddress || '').toLowerCase(),
+      action_type: eventData.actionType || 'PAYMENT_CONFIRMED',
+      context: eventData.context || 'Received via UPI (Razorpay Verified)',
+      tx_hash: eventData.txHash || eventData.paymentId || `0xpay_${Date.now().toString(16)}`,
+      block_number: 14221080,
+      log_index: 0,
+      block_timestamp: new Date(),
+      created_at: new Date()
+    };
+    await this.audit_logs.insertOne(entry);
+    return entry;
   }
 
   async debitWalletBalance(walletAddress, amount, details = {}) {
@@ -546,6 +562,11 @@ class MongoDatabase {
 
   async getPayment(orderId) {
     return await this.payments.findOne({ order_id: orderId });
+  }
+
+  async getPaymentByPaymentId(paymentId) {
+    if (!paymentId) return null;
+    return await this.payments.findOne({ payment_id: paymentId });
   }
 
   async inspect() {
@@ -969,6 +990,22 @@ class MemoryDatabase {
     };
   }
 
+  async logAuditEvent(eventData) {
+    const entry = {
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      actor_address: String(eventData.actorAddress || eventData.walletAddress || '').toLowerCase(),
+      action_type: eventData.actionType || 'PAYMENT_CONFIRMED',
+      context: eventData.context || 'Received via UPI (Razorpay Verified)',
+      tx_hash: eventData.txHash || eventData.paymentId || `0xpay_${Date.now().toString(16)}`,
+      block_number: 14221080,
+      log_index: 0,
+      block_timestamp: new Date(),
+      created_at: new Date()
+    };
+    this.audit_logs.unshift(entry);
+    return entry;
+  }
+
   async debitWalletBalance(walletAddress, amount, details = {}) {
     const wallet = String(walletAddress || '').toLowerCase();
     const polAmount = Number(amount);
@@ -1050,6 +1087,11 @@ class MemoryDatabase {
 
   async getPayment(orderId) {
     return this.payments.find(pay => pay.order_id === orderId) || null;
+  }
+
+  async getPaymentByPaymentId(paymentId) {
+    if (!paymentId) return null;
+    return this.payments.find(pay => pay.payment_id === paymentId) || null;
   }
 
   async inspect() {
@@ -1195,6 +1237,16 @@ export const db = {
   getPayment: async (orderId) => {
     if (mongoDb) return await mongoDb.getPayment(orderId);
     return await memoryDb.getPayment(orderId);
+  },
+
+  getPaymentByPaymentId: async (paymentId) => {
+    if (mongoDb) return await mongoDb.getPaymentByPaymentId(paymentId);
+    return await memoryDb.getPaymentByPaymentId(paymentId);
+  },
+
+  logAuditEvent: async (eventData) => {
+    if (mongoDb) return await mongoDb.logAuditEvent(eventData);
+    return await memoryDb.logAuditEvent(eventData);
   },
 
   getMongoDb: () => mongoDbInstance,

@@ -13,7 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 import { db } from './db.js';
-import { requireAuth } from './middleware/auth.js';
+import { requireAuth, optionalAuth } from './middleware/auth.js';
 import { getNonce, connectWallet, getMe, registerUser, loginUser, googleAuth } from './controllers/auth.controller.js';
 import {
   uploadRecord,
@@ -35,6 +35,7 @@ import {
   createRazorpayOrder,
   verifyRazorpayPayment,
   handleRazorpayWebhook,
+  getPaymentStatus,
   getWalletBalance,
   getWalletTransactions
 } from './controllers/payment.controller.js';
@@ -213,13 +214,18 @@ app.get(['/records/:id/retrieve', '/api/records/:id/retrieve'], requireAuth, ret
 // ─── Razorpay UPI Payment Gateway & Wallet Webhooks ──────────
 app.post(
   ['/payments/razorpay/create-order', '/api/payments/razorpay/create-order', '/payment/create-order', '/api/payment/create-order'],
-  requireAuth,
+  optionalAuth,
   createRazorpayOrder
 );
 app.post(
   ['/payments/razorpay/verify', '/api/payments/razorpay/verify', '/payment/verify', '/api/payment/verify'],
-  requireAuth,
+  optionalAuth,
   verifyRazorpayPayment
+);
+app.get(
+  ['/payments/status', '/api/payments/status', '/payment/status', '/api/payment/status'],
+  optionalAuth,
+  getPaymentStatus
 );
 app.post(
   [

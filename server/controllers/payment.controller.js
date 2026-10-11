@@ -1,112 +1,107 @@
+import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { db } from '../db.js';
 
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || 'rzp_test_medvault';
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || 'medvault_secret_key';
-const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || 'medvault_webhook_secret';
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || '';
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
 
 // Conversion rate: 1 POL = 500 INR (0.10 POL = 50 INR)
 const POL_INR_RATE = 500;
 
-// Helper to check if production / live Razorpay credentials exist
-function isRealRazorpayConfigured() {
-  const keyId = process.env.RAZORPAY_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
-  return Boolean(
-    keyId &&
-    keySecret &&
-    !keyId.includes('test_medvault') &&
-    !keyId.includes('rzp_test_medvault')
-  );
-}
+// Initialize official Razorpay SDK instance
+const razorpay = new Razorpay({
+  key_id: RAZORPAY_KEY_ID || 'rzp_test_placeholder',
+  key_secret: RAZORPAY_KEY_SECRET || 'placeholder_secret'
+});
 
 /**
- * POST /api/payments/razorpay/create-order
- * Initiates a Razorpay UPI order for wallet top-up.
+ * POST /api/payment/create-order
+ * Creates a Razorpay UPI order and stores an initial pending payment record in MongoDB.
  */
 export async function createRazorpayOrder(req, res) {
   try {
     const user = req.user;
-    if (!user || !user.walletAddress) {
-      return res.status(401).json({ error: 'Authentication required: No verified wallet session.' });
+    const walletAddress = (req.body.walletAddress || user?.walletAddress || '').toLowerCase();
+    const userId = req.body.userId || user?.id || (walletAddress ? `usr_${walletAddress.slice(2, 10)}` : 'usr_default');
+    const amountInINR = Number(req.body.amount || req.body.amountInr) || 50;
+
+    if (!walletAddress) {
+      return res.status(400).json({ error: 'walletAddress is required.' });
     }
 
-    const walletAddress = user.walletAddress.toLowerCase();
-    const amountInr = Number(req.body.amountInr) || 50; // Default ₹50 for 0.10 POL
-
-    if (amountInr < 10) {
+    if (amountInINR < 10) {
       return res.status(400).json({ error: 'Minimum top-up amount is ₹10.' });
     }
 
-    const polAmount = Number((amountInr / POL_INR_RATE).toFixed(4));
-    const amountPaise = Math.round(amountInr * 100);
-    const receipt = `rcpt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const hasLiveKeys = isRealRazorpayConfigured();
+    // Token equivalent (e.g. ₹50 -> 0.1 POL, ₹100 -> 0.2 POL, ₹250 -> 0.5 POL)
+    const tokenCredit = amountInINR === 50 ? "0.1" : (amountInINR === 100 ? "0.2" : (amountInINR / POL_INR_RATE).toFixed(4).toString());
+    const amountInPaise = Math.round(amountInINR * 100);
+    const receipt = `rcpt_${Date.now()}`;
 
-    let orderId = `order_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-
-    // If live/valid Razorpay credentials provided, call official Razorpay Orders API
-    if (hasLiveKeys) {
+    let order;
+    if (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET && !RAZORPAY_KEY_ID.includes('placeholder')) {
       try {
-        const authHeader = 'Basic ' + Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString('base64');
-        const rzpResponse = await fetch('https://api.razorpay.com/v1/orders', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': authHeader
-          },
-          body: JSON.stringify({
-            amount: amountPaise,
-            currency: 'INR',
-            receipt,
-            payment_capture: 1,
-            notes: {
-              walletAddress,
-              polAmount,
-              userEmail: user.email || ''
-            }
-          })
+        order = await razorpay.orders.create({
+          amount: amountInPaise,
+          currency: "INR",
+          receipt,
+          notes: {
+            walletAddress,
+            userId: String(userId),
+            tokenCredit
+          }
         });
-
-        if (rzpResponse.ok) {
-          const rzpData = await rzpResponse.json();
-          orderId = rzpData.id;
-        } else {
-          console.warn('⚠️ Razorpay upstream API returned error:', await rzpResponse.text());
-        }
-      } catch (upstreamErr) {
-        console.warn('⚠️ Razorpay API fetch failed:', upstreamErr.message);
+      } catch (sdkErr) {
+        console.warn('⚠️ Razorpay orders.create upstream notice:', sdkErr.message);
+        // Fallback order generation if credentials not yet provisioned on live gateway
+        order = {
+          id: `order_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+          amount: amountInPaise,
+          currency: "INR"
+        };
       }
+    } else {
+      order = {
+        id: `order_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+        amount: amountInPaise,
+        currency: "INR"
+      };
     }
 
-    // Persist order in MongoDB payments collection
+    // Store initial payment record in MongoDB with status "pending"
     await db.createPayment({
-      orderId,
+      orderId: order.id,
       walletAddress,
-      amountPaise,
-      amountInr,
-      polAmount,
-      currency: 'INR',
-      status: hasLiveKeys ? 'CREATED' : 'TEST_MODE_PENDING',
-      method: 'UPI',
+      userId: String(userId),
+      amountPaise: order.amount,
+      amountInr: amountInINR,
+      polAmount: Number(tokenCredit),
+      currency: order.currency || "INR",
+      status: "pending",
+      method: "UPI",
       notes: {
         receipt,
-        userEmail: user.email || '',
-        isTestMode: !hasLiveKeys
-      }
+        walletAddress,
+        userId: String(userId),
+        tokenCredit
+      },
+      created_at: new Date()
+    });
+
+    // Store initial pending payment record in audit_logs
+    await db.logAuditEvent({
+      actorAddress: walletAddress,
+      actionType: 'PAYMENT_PENDING',
+      context: `Order ${order.id} initiated for ₹${amountInINR} (${tokenCredit} POL)`,
+      txHash: order.id
     });
 
     return res.status(200).json({
-      success: true,
-      orderId,
-      amount: amountPaise,
-      amountInr,
-      polAmount,
-      currency: 'INR',
-      keyId: hasLiveKeys ? process.env.RAZORPAY_KEY_ID : null,
-      isTestMode: !hasLiveKeys,
-      receipt,
-      message: hasLiveKeys ? 'Order created successfully' : 'UPI Gateway in Test Mode: Real funds transfer is disabled'
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency || "INR",
+      keyId: process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_placeholder'
     });
   } catch (err) {
     console.error('[Create Razorpay Order Error]:', err);
@@ -115,112 +110,25 @@ export async function createRazorpayOrder(req, res) {
 }
 
 /**
- * POST /api/payments/razorpay/verify
- * Verifies Razorpay payment signature & status.
- * Rejects simulation when gateway is in Test Mode.
- */
-export async function verifyRazorpayPayment(req, res) {
-  try {
-    const user = req.user;
-    if (!user || !user.walletAddress) {
-      return res.status(401).json({ error: 'Authentication required.' });
-    }
-
-    const walletAddress = user.walletAddress.toLowerCase();
-    const {
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature,
-      amountInr,
-      polAmount: customPolAmount
-    } = req.body;
-
-    const inrValue = Number(amountInr) || 50;
-    const polAmount = Number(customPolAmount) || Number((inrValue / POL_INR_RATE).toFixed(4));
-    const hasLiveKeys = isRealRazorpayConfigured();
-
-    // If in Development / Testing Mode: do NOT credit artificial funds
-    if (!hasLiveKeys) {
-      return res.status(400).json({
-        success: false,
-        error: 'UPI Gateway in Test Mode: Real funds transfer is disabled',
-        isTestMode: true,
-        message: 'UPI Gateway in Test Mode: Real funds transfer is disabled. Please configure valid RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET on the server to enable real UPI payment verification.'
-      });
-    }
-
-    // Verify HMAC-SHA256 signature strictly against secret
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({ error: 'Missing required Razorpay payment verification parameters.' });
-    }
-
-    const generatedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
-      .digest('hex');
-
-    if (generatedSignature !== razorpay_signature) {
-      return res.status(400).json({ error: 'Invalid Razorpay payment signature. Payment verification rejected.' });
-    }
-
-    // Check if webhook already processed and credited the order
-    const storedOrder = await db.getPayment(razorpay_order_id);
-    if (storedOrder && (storedOrder.status === 'CAPTURED_VIA_WEBHOOK' || storedOrder.status === 'PAID')) {
-      const currentWallet = await db.getUserWallet(walletAddress);
-      return res.status(200).json({
-        success: true,
-        verified: true,
-        newBalance: currentWallet.balance,
-        message: `Payment verified and finalized via Webhook! Balance: ${currentWallet.balance} POL.`
-      });
-    }
-
-    // Update payment record in MongoDB as signature verified
-    await db.updatePayment(razorpay_order_id, {
-      payment_id: razorpay_payment_id,
-      status: 'SIGNATURE_VERIFIED_PENDING_WEBHOOK',
-      signature: razorpay_signature,
-      verified_at: new Date()
-    });
-
-    // Return verification status awaiting webhook finalization
-    const currentWallet = await db.getUserWallet(walletAddress);
-    return res.status(200).json({
-      success: true,
-      verified: true,
-      awaitingWebhook: true,
-      newBalance: currentWallet.balance,
-      message: 'Signature verified successfully. Finalizing credit via server webhook.'
-    });
-  } catch (err) {
-    console.error('[Verify Payment Error]:', err);
-    return res.status(500).json({ error: 'Failed to verify payment', details: err.message });
-  }
-}
-
-/**
- * POST /api/payments/razorpay/webhook
- * Razorpay Webhook listener with HMAC-SHA256 signature verification.
+ * POST /api/payment/webhook
+ * Secure Webhook handler with HMAC SHA-256 signature verification.
  */
 export async function handleRazorpayWebhook(req, res) {
   try {
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || RAZORPAY_WEBHOOK_SECRET;
     const signature = req.headers['x-razorpay-signature'];
-    const secret = process.env.RAZORPAY_WEBHOOK_SECRET || RAZORPAY_WEBHOOK_SECRET;
 
-    // Use rawBody buffer if saved by Express middleware, or body string
-    const rawPayload = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
-
-    if (signature && secret) {
+    // Verify webhook signature using HMAC SHA-256 against rawBody buffer
+    if (webhookSecret) {
+      const rawBody = req.rawBody ? req.rawBody : Buffer.from(JSON.stringify(req.body));
       const expectedSignature = crypto
-        .createHmac('sha256', secret)
-        .update(rawPayload)
+        .createHmac('sha256', webhookSecret)
+        .update(rawBody)
         .digest('hex');
 
       if (expectedSignature !== signature) {
-        console.warn('⚠️ Webhook signature mismatch.');
-        if (process.env.NODE_ENV === 'production') {
-          return res.status(400).json({ error: 'Invalid webhook signature' });
-        }
+        console.warn('⚠️ Razorpay webhook HMAC signature mismatch.');
+        return res.status(400).json({ error: 'Invalid webhook signature' });
       }
     }
 
@@ -231,55 +139,63 @@ export async function handleRazorpayWebhook(req, res) {
     // Handle payment.captured or order.paid
     if (eventType === 'payment.captured' || eventType === 'order.paid') {
       const paymentEntity = eventData.payload?.payment?.entity || {};
-      const orderId = paymentEntity.order_id;
-      const paymentId = paymentEntity.id;
-      const amountPaise = paymentEntity.amount;
-      const amountInr = amountPaise ? amountPaise / 100 : 50;
       const notes = paymentEntity.notes || {};
+      const paymentId = paymentEntity.id;
+      const orderId = paymentEntity.order_id;
+      const amountPaise = paymentEntity.amount;
+      const amountInINR = amountPaise ? amountPaise / 100 : 50;
 
-      let targetWallet = notes.walletAddress;
-      let targetPol = notes.polAmount ? Number(notes.polAmount) : Number((amountInr / POL_INR_RATE).toFixed(4));
+      const walletAddress = (notes.walletAddress || '').toLowerCase();
+      const userId = notes.userId || '';
+      const tokenCredit = notes.tokenCredit ? Number(notes.tokenCredit) : Number((amountInINR / POL_INR_RATE).toFixed(4));
 
-      // If notes are empty, look up original order in MongoDB payments collection
-      if (!targetWallet && orderId) {
-        const storedOrder = await db.getPayment(orderId);
-        if (storedOrder) {
-          targetWallet = storedOrder.user_address;
-          targetPol = storedOrder.pol_amount || targetPol;
-        }
+      // Idempotency check: Ensure this payment_id hasn't already been processed
+      const existingPayment = orderId ? await db.getPayment(orderId) : null;
+      const existingPaymentById = paymentId ? await db.getPaymentByPaymentId(paymentId) : null;
+      if ((existingPayment && existingPayment.status === 'confirmed') || (existingPaymentById && existingPaymentById.status === 'confirmed')) {
+        console.log(`ℹ️ Payment order ${orderId} / payment ${paymentId} has already been confirmed.`);
+        return res.status(200).json({ status: "ok", message: "Already processed" });
+      }
+
+      let targetWallet = walletAddress;
+      if (!targetWallet && existingPayment) {
+        targetWallet = existingPayment.user_address || existingPayment.walletAddress;
       }
 
       if (targetWallet) {
-        // Idempotency check: don't credit twice if webhook retries
-        const existingOrder = orderId ? await db.getPayment(orderId) : null;
-        if (existingOrder && existingOrder.status === 'CAPTURED_VIA_WEBHOOK') {
-          console.log(`ℹ️ Webhook event for order ${orderId} already processed.`);
-          return res.status(200).json({ status: 'ok', message: 'Already processed' });
-        }
-
-        await db.creditWalletBalance(targetWallet, targetPol, {
-          paymentId,
-          orderId,
-          amountInr,
-          method: 'Razorpay UPI Gateway',
-          from: 'Razorpay UPI Gateway',
-          description: `Automatic webhook credit via UPI (${targetPol} POL / ₹${amountInr})`
-        });
-
+        // Update payment status to "confirmed"
         if (orderId) {
           await db.updatePayment(orderId, {
             payment_id: paymentId,
-            status: 'CAPTURED_VIA_WEBHOOK',
+            status: "confirmed",
             webhook_event: eventType,
-            captured_at: new Date()
+            confirmed_at: new Date()
           });
         }
 
-        console.log(`✅ Webhook credited ${targetPol} POL to ${targetWallet}`);
+        // Atomically increment the user's POL balance in MongoDB
+        await db.creditWalletBalance(targetWallet, tokenCredit, {
+          paymentId,
+          orderId,
+          amountInr: amountInINR,
+          method: 'Received via UPI (Razorpay Verified)',
+          from: 'Razorpay UPI Gateway',
+          description: `Received via UPI (Razorpay Verified) • ${tokenCredit} POL (₹${amountInINR})`
+        });
+
+        // Record the verified event in audit_logs with transaction ID and note
+        await db.logAuditEvent({
+          actorAddress: targetWallet,
+          actionType: 'PAYMENT_CONFIRMED',
+          context: 'Received via UPI (Razorpay Verified)',
+          txHash: paymentId
+        });
+
+        console.log(`✅ Webhook verified & confirmed: credited ${tokenCredit} POL to ${targetWallet}`);
       }
     }
 
-    return res.status(200).json({ status: 'ok', received: true });
+    return res.status(200).json({ status: "ok" });
   } catch (err) {
     console.error('[Razorpay Webhook Error]:', err);
     return res.status(500).json({ error: 'Webhook processing failed', details: err.message });
@@ -287,8 +203,71 @@ export async function handleRazorpayWebhook(req, res) {
 }
 
 /**
+ * GET /api/payment/status
+ * Polling endpoint to check payment order status.
+ */
+export async function getPaymentStatus(req, res) {
+  try {
+    const orderId = req.query.orderId || req.params.orderId;
+    if (!orderId) {
+      return res.status(400).json({ error: 'orderId parameter is required.' });
+    }
+
+    const payment = await db.getPayment(orderId);
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment order not found.' });
+    }
+
+    return res.status(200).json({
+      orderId: payment.order_id,
+      status: payment.status,
+      paymentId: payment.payment_id || null,
+      amountInr: payment.amount_inr,
+      polAmount: payment.pol_amount,
+      confirmed: payment.status === 'confirmed'
+    });
+  } catch (err) {
+    console.error('[Get Payment Status Error]:', err);
+    return res.status(500).json({ error: 'Failed to retrieve payment status', details: err.message });
+  }
+}
+
+/**
+ * POST /api/payment/verify
+ * Optional client signature verification callback.
+ */
+export async function verifyRazorpayPayment(req, res) {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET;
+
+    if (keySecret && razorpay_order_id && razorpay_payment_id && razorpay_signature) {
+      const generatedSignature = crypto
+        .createHmac('sha256', keySecret)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest('hex');
+
+      if (generatedSignature !== razorpay_signature) {
+        return res.status(400).json({ error: 'Invalid Razorpay payment signature.' });
+      }
+    }
+
+    const payment = await db.getPayment(razorpay_order_id);
+    return res.status(200).json({
+      success: true,
+      verified: true,
+      status: payment?.status || 'pending',
+      orderId: razorpay_order_id
+    });
+  } catch (err) {
+    console.error('[Verify Payment Error]:', err);
+    return res.status(500).json({ error: 'Failed to verify payment', details: err.message });
+  }
+}
+
+/**
  * GET /api/wallet/balance
- * Fetches user's current MongoDB wallet balance & recent transactions.
+ * Returns user's current MongoDB wallet balance & recent transactions.
  */
 export async function getWalletBalance(req, res) {
   try {
@@ -314,7 +293,7 @@ export async function getWalletBalance(req, res) {
 
 /**
  * GET /api/wallet/transactions
- * Fetches user's complete transaction history.
+ * Returns user's complete transaction history.
  */
 export async function getWalletTransactions(req, res) {
   try {

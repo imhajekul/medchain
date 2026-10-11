@@ -269,20 +269,36 @@ export const api = {
     return handleApiResponse(res, 'Failed to fetch wallet transactions');
   },
 
-  async createRazorpayOrder(amountInr = 50) {
-    const res = await fetch(`${API_BASE}/payments/razorpay/create-order`, {
+  async createRazorpayOrder(amount = 50, walletAddress = '', userId = '') {
+    const payload = typeof amount === 'object'
+      ? amount
+      : {
+          amount: Number(amount) || 50,
+          amountInr: Number(amount) || 50,
+          walletAddress: walletAddress || undefined,
+          userId: userId || undefined
+        };
+
+    const res = await fetch(`${API_BASE}/payment/create-order`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...getAuthHeaders()
       },
-      body: JSON.stringify({ amountInr })
+      body: JSON.stringify(payload)
     });
     return handleApiResponse(res, 'Failed to create Razorpay payment order');
   },
 
+  async getPaymentStatus(orderId) {
+    const res = await fetch(`${API_BASE}/payment/status?orderId=${encodeURIComponent(orderId)}`, {
+      headers: { ...getAuthHeaders() }
+    });
+    return handleApiResponse(res, 'Failed to fetch payment status');
+  },
+
   async verifyRazorpayPayment(paymentData) {
-    const res = await fetch(`${API_BASE}/payments/razorpay/verify`, {
+    const res = await fetch(`${API_BASE}/payment/verify`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
