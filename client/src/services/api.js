@@ -242,7 +242,7 @@ export const api = {
     return handleApiResponse(res, 'Failed to fetch security information');
   },
 
-  // --- Step 5: Secure Doctor Retrieval ---
+  // --- Step 5: Secure Record Retrieval (Owner Default & Doctor Grants) ---
   async retrieveRecordForDoctor(recordIdHex) {
     const res = await fetch(`${API_BASE}/records/${recordIdHex}/retrieve`, {
       headers: { ...getAuthHeaders() }
@@ -250,7 +250,50 @@ export const api = {
     return handleApiResponse(res, 'Access denied or grant expired');
   },
 
-  // --- Step 6: AI Health Assistant & Clinical Copilot ---
+  async retrieveRecord(recordId) {
+    return this.retrieveRecordForDoctor(recordId);
+  },
+
+  // --- Step 6: Vault Wallet & Razorpay UPI Payments ---
+  async getWalletBalance() {
+    const res = await fetch(`${API_BASE}/wallet/balance`, {
+      headers: { ...getAuthHeaders() }
+    });
+    return handleApiResponse(res, 'Failed to fetch wallet balance');
+  },
+
+  async getWalletTransactions() {
+    const res = await fetch(`${API_BASE}/wallet/transactions`, {
+      headers: { ...getAuthHeaders() }
+    });
+    return handleApiResponse(res, 'Failed to fetch wallet transactions');
+  },
+
+  async createRazorpayOrder(amountInr = 50) {
+    const res = await fetch(`${API_BASE}/payments/razorpay/create-order`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({ amountInr })
+    });
+    return handleApiResponse(res, 'Failed to create Razorpay payment order');
+  },
+
+  async verifyRazorpayPayment(paymentData) {
+    const res = await fetch(`${API_BASE}/payments/razorpay/verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify(paymentData)
+    });
+    return handleApiResponse(res, 'Failed to verify UPI payment');
+  },
+
+  // --- Step 7: AI Health Assistant & Clinical Copilot ---
   async aiChat(message, history = [], context = {}) {
     const res = await fetch(`${API_BASE}/ai/chat`, {
       method: 'POST',
@@ -263,7 +306,7 @@ export const api = {
     return handleApiResponse(res, 'AI assistant unavailable');
   },
 
-  // --- Step 7: Live Database Cluster Inspector ---
+  // --- Step 8: Live Database Cluster Inspector ---
   async inspectDatabase() {
     const res = await fetch(`${API_BASE}/admin/db-inspect`);
     return handleApiResponse(res, 'Failed to inspect database');

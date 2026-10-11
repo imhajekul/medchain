@@ -3,12 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, FileText, Lock, Shield, Clock, Copy, Check, Share2,
-  Activity, X, ExternalLink
+  Activity, X, ExternalLink, Download, CreditCard, CheckCircle2, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useCountdown, formatDate, formatRelativeTime } from '../hooks/useHelpers';
 import { api } from '../services/api';
 import { ErrorBoundary } from '../components/shared/ErrorBoundary';
+import UpiTopUpModal from '../components/shared/UpiTopUpModal';
 import './RecordDetail.css';
 
 const itemVariants = {
@@ -26,7 +27,10 @@ const expiryPresets = [
 function RecordDetailContent() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { records, authLoading, getRecordGrants, getRecordAuditEvents, createGrant, addToast } = useApp();
+  const {
+    records, authLoading, getRecordGrants, getRecordAuditEvents,
+    createGrant, retrieveAndDecryptRecord, walletBalance, refreshWalletBalance, addToast
+  } = useApp();
 
   const [record, setRecord] = useState(null);
   const [fetching, setFetching] = useState(true);
@@ -35,6 +39,43 @@ function RecordDetailContent() {
   const [showGrantModal, setShowGrantModal] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [newGrant, setNewGrant] = useState(null);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [decryptedRecord, setDecryptedRecord] = useState(null);
+  const [showUpiModal, setShowUpiModal] = useState(false);
+
+  const handleDecryptAndDownload = async () => {
+    if (!record) return;
+    setIsDecrypting(true);
+    try {
+      const result = await retrieveAndDecryptRecord(record.id || id);
+      const fileExt = (record.fileType || record.mimeType?.split('/')[1] || 'pdf').toLowerCase();
+      const safeLabel = (record.label || 'medical_record').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const downloadName = `${safeLabel}_decrypted.${fileExt}`;
+
+      // Automatically initiate download
+      const downloadLink = document.createElement('a');
+      downloadLink.href = result.decryptedUrl;
+      downloadLink.download = downloadName;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+
+      setDecryptedRecord({
+        url: result.decryptedUrl,
+        fileName: downloadName,
+        mimeType: result.mimeType || 'application/pdf',
+        decryptedAt: new Date().toLocaleTimeString(),
+        isOwner: result.isOwner
+      });
+
+      addToast('Decrypted file downloaded to your device!', 'success');
+    } catch (err) {
+      console.error('[Decryption Download Error]:', err);
+      addToast(err.message || 'Failed to decrypt and download file', 'error');
+    } finally {
+      setIsDecrypting(false);
+    }
+  };
 
   // 1. Fetch & Hydrate Record Data
   useEffect(() => {
@@ -210,15 +251,37 @@ function RecordDetailContent() {
                 <span>Uploaded {formatDate(record.createdAt)}</span>
               </div>
             </div>
-            <motion.button
-              className="btn btn-primary"
-              onClick={() => setShowGrantModal(true)}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-            >
-              <Share2 size={16} />
-              Grant Access
-            </motion.button>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <motion.button
+                className="btn btn-secondary"
+                onClick={handleDecryptAndDownload}
+                disabled={isDecrypting}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                style={{ borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+              >
+                {isDecrypting ? (
+                  <>
+                    <RefreshCw size={16} className="spin-animation" />
+                    Decrypting...
+                  </>
+                ) : (
+                  <>
+                    <Download size={16} />
+                    {decryptedRecord ? 'Re-Download Decrypted' : '🔓 Decrypt & Download'}
+                  </>
+                )}
+              </motion.button>
+              <motion.button
+                className="btn btn-primary"
+                onClick={() => setShowGrantModal(true)}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+              >
+                <Share2 size={16} />
+                Grant Access (0.10 POL)
+              </motion.button>
+            </div>
           </div>
 
           <div className="record-header-details">
@@ -238,6 +301,65 @@ function RecordDetailContent() {
             </div>
           </div>
         </motion.div>
+
+        {/* Decrypted Plaintext In-Browser Card Banner */}
+        <AnimatePresence>
+          {decryptedRecord && (
+            <motion.div
+              className="glass-card"
+              style={{
+                marginTop: '1.25rem',
+                padding: '1.25rem 1.5rem',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                background: 'rgba(16, 185, 129, 0.06)',
+                borderRadius: '16px'
+              }}
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                  <div style={{ width: 42, height: 42, borderRadius: '12px', background: 'rgba(16, 185, 129, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981' }}>
+                    <CheckCircle2 size={24} />
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: '#ffffff' }}>
+                      Decrypted Personal Record ({decryptedRecord.fileName})
+                    </h4>
+                    <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
+                      Zero Data Exposure Verified • Decrypted in client memory via WebCrypto AES-256-GCM at {decryptedRecord.decryptedAt}
+                    </p>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+                  <a
+                    href={decryptedRecord.url}
+                    download={decryptedRecord.fileName}
+                    className="btn btn-primary btn-sm"
+                  >
+                    <Download size={14} /> Download File
+                  </a>
+                  <a
+                    href={decryptedRecord.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-secondary btn-sm"
+                  >
+                    <ExternalLink size={14} /> Preview
+                  </a>
+                  <button
+                    className="btn btn-icon btn-ghost btn-sm"
+                    onClick={() => setDecryptedRecord(null)}
+                    title="Dismiss preview"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="record-grid">
           {/* Grants Section */}
@@ -350,6 +472,21 @@ function RecordDetailContent() {
             recordId={id}
             onClose={() => setShowGrantModal(false)}
             onCreated={handleGrantCreated}
+            onOpenTopUp={() => setShowUpiModal(true)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* UPI Top-Up Modal */}
+      <AnimatePresence>
+        {showUpiModal && (
+          <UpiTopUpModal
+            isOpen={showUpiModal}
+            onClose={() => setShowUpiModal(false)}
+            onSuccess={() => {
+              refreshWalletBalance();
+              addToast('Wallet credited! You can now grant access.', 'success');
+            }}
           />
         )}
       </AnimatePresence>
@@ -408,12 +545,15 @@ function GrantCard({ grant }) {
 }
 
 /* --- Grant Access Modal --- */
-function GrantModal({ recordId, onClose, onCreated }) {
-  const { createGrant, loading, addToast } = useApp();
+function GrantModal({ recordId, onClose, onCreated, onOpenTopUp }) {
+  const { createGrant, loading, walletBalance, addToast } = useApp();
   const [granteeWallet, setGranteeWallet] = useState('');
   const [selectedExpiry, setSelectedExpiry] = useState(86400);
   const [customHours, setCustomHours] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const GRANT_FEE = 0.10;
+  const hasSufficientFunds = (walletBalance || 0) >= GRANT_FEE;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -519,15 +659,63 @@ function GrantModal({ recordId, onClose, onCreated }) {
             <p>Creates a cryptographic on-chain access grant. The recipient can decrypt and review this record until the time-box expires.</p>
           </div>
 
+          {/* Wallet Fee & Top-Up Section */}
+          <div style={{
+            background: 'rgba(30, 41, 59, 0.6)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '12px',
+            padding: '0.85rem 1rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+              <span style={{ color: '#94a3b8' }}>Grant Issuance Fee:</span>
+              <strong style={{ color: '#38bdf8' }}>0.10 POL (₹50)</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+              <span style={{ color: '#94a3b8' }}>Your Vault Wallet Balance:</span>
+              <strong style={{ color: hasSufficientFunds ? '#10b981' : '#f43f5e' }}>
+                {(walletBalance || 0).toFixed(4)} POL
+              </strong>
+            </div>
+          </div>
+
+          {!hasSufficientFunds && (
+            <div style={{
+              background: 'rgba(244, 63, 94, 0.08)',
+              border: '1px solid rgba(244, 63, 94, 0.3)',
+              borderRadius: '12px',
+              padding: '0.85rem 1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem'
+            }}>
+              <AlertCircle size={20} color="#f43f5e" style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1, fontSize: '0.8rem', color: '#cbd5e1' }}>
+                <span style={{ fontWeight: 600, color: '#f43f5e', display: 'block' }}>Insufficient Wallet Funds</span>
+                0.10 POL (₹50) required to issue an access grant.
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => onOpenTopUp?.()}
+                style={{ flexShrink: 0 }}
+              >
+                <CreditCard size={14} /> Top Up UPI
+              </button>
+            </div>
+          )}
+
           <motion.button
             type="submit"
             className="btn btn-primary btn-lg"
             style={{ width: '100%' }}
-            disabled={!granteeWallet.trim() || loading || isSubmitting}
+            disabled={!granteeWallet.trim() || loading || isSubmitting || !hasSufficientFunds}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            {loading || isSubmitting ? 'Registering Grant On-Chain...' : 'Create Time-Boxed Grant'}
+            {loading || isSubmitting ? 'Registering Grant...' : (hasSufficientFunds ? 'Create Time-Boxed Grant (0.10 POL)' : 'Top Up Wallet to Continue')}
           </motion.button>
         </form>
       </motion.div>

@@ -62,20 +62,35 @@ export async function createGrant(req, res) {
       return res.status(403).json({ error: 'Forbidden: Only the record owner can grant access.' });
     }
 
+    // 2. Enforce wallet balance check (Grant fee: 0.10 POL / ₹50)
+    const GRANT_FEE = 0.10;
+    const GRANT_FEE_INR = 50;
+    const walletInfo = await db.getUserWallet(user.walletAddress);
+
+    if (walletInfo.balance < GRANT_FEE) {
+      return res.status(402).json({
+        error: `Insufficient wallet balance. Issuing an access grant requires a fee of ${GRANT_FEE} POL (₹${GRANT_FEE_INR}). Please top up your wallet via UPI.`,
+        requiresTopUp: true,
+        requiredFee: GRANT_FEE,
+        feeInr: GRANT_FEE_INR,
+        currentBalance: walletInfo.balance
+      });
+    }
+
     const normalizedGrantee = granteeWallet.toLowerCase();
     const validFrom = new Date();
     const expiresAt = new Date(Date.now() + Number(expiresInSeconds) * 1000);
     const grantId = `grant_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const txHash = `0x${Math.random().toString(16).substring(2, 66).padEnd(64, '0')}`;
 
-    // 2. Persist grant in database
+    // 3. Persist grant in database
     await db.query(
       `INSERT INTO access_grants (grant_id_hex, record_id_hex, owner_address, grantee_address, valid_from, valid_to, tx_hash)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [grantId, recordId, user.walletAddress, normalizedGrantee, validFrom, expiresAt, txHash]
     );
 
-    // 3. Store grantee's encrypted key envelope (if provided)
+    // 4. Store grantee's encrypted key envelope (if provided)
     if (encryptedKeyMaterial) {
       await db.query(
         `INSERT INTO encrypted_key_bundles (record_id_hex, recipient_address, encrypted_key_material, key_algorithm)
@@ -86,11 +101,20 @@ export async function createGrant(req, res) {
       );
     }
 
-    // 4. Log ISSUED event in Audit Trail
+    // 5. Deduct grant fee from user's vault wallet in MongoDB
+    const debitResult = await db.debitWalletBalance(user.walletAddress, GRANT_FEE, {
+      grantId,
+      recordId,
+      grantee: normalizedGrantee,
+      amountInr: GRANT_FEE_INR,
+      description: `Access grant issued for ${normalizedGrantee}`
+    });
+
+    // 6. Log ISSUED event in Audit Trail
     await db.query(
       `INSERT INTO audit_logs (record_id_hex, actor_address, action_type, context, block_number, tx_hash, log_index, block_timestamp)
        VALUES ($1, $2, 'ISSUED', $3, $4, $5, $6, $7)`,
-      [recordId, user.walletAddress, `Grant created for ${normalizedGrantee}`, 14221000, txHash, 0, validFrom]
+      [recordId, user.walletAddress, `Grant created for ${normalizedGrantee} (Fee: ${GRANT_FEE} POL)`, 14221000, txHash, 0, validFrom]
     );
 
     const shareableLink = `https://medvault.app/access/${grantId}`;
@@ -98,7 +122,9 @@ export async function createGrant(req, res) {
     return res.status(201).json({
       grantId,
       expiresAt: expiresAt.toISOString(),
-      shareableLink
+      shareableLink,
+      feeDeducted: GRANT_FEE,
+      remainingBalance: debitResult.newBalance
     });
   } catch (err) {
     console.error('[Create Grant Error]:', err);

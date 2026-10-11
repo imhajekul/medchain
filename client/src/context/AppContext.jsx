@@ -607,27 +607,52 @@ export function AppProvider({ children }) {
 
   // =========================================================================
   // STEP 5: Doctor Secure 4-Step Retrieval & In-Browser Decryption
+  const [walletBalance, setWalletBalance] = useState(0.00);
+
+  const refreshWalletBalance = useCallback(async () => {
+    try {
+      if (user?.sessionToken) {
+        const balData = await api.getWalletBalance();
+        if (typeof balData?.balance === 'number') {
+          setWalletBalance(balData.balance);
+          return balData.balance;
+        }
+      }
+    } catch (e) {
+      // offline or silent notice
+    }
+    return 0.00;
+  }, [user]);
+
+  useEffect(() => {
+    refreshWalletBalance();
+  }, [refreshWalletBalance]);
+
+  // =========================================================================
+  // STEP 5: Secure Record Retrieval & Decryption (Owner & Doctor Grants)
   // =========================================================================
   const retrieveAndDecryptRecord = useCallback(async (recordId) => {
     setLoading(true);
     try {
-      // 1. Fetch ciphertext & doctor DEK envelope from backend
+      // 1. Fetch ciphertext & DEK envelope from backend (Owner default or Doctor grant)
       const response = await api.retrieveRecordForDoctor(recordId);
 
-      // 2. Decrypt ciphertext in the doctor's browser memory
+      // 2. Decrypt ciphertext directly in client browser memory
       const decrypted = await decryptFileClientSide(
         response.encryptedBlob,
         response.keyBundle?.encryptedKeyMaterial || btoa('TEST_RAW_DEK'),
         response.mimeType || 'application/pdf'
       );
 
-      addToast(`Record accessed and decrypted! Audit Tx: ${response.auditTxHash?.substring(0, 10)}...`, 'success');
+      addToast(`Record accessed and decrypted! ${response.isOwner ? '(Personal Health Vault)' : `(Audit Tx: ${response.auditTxHash?.substring(0, 10)}...)`}`, 'success');
       return {
         ...response,
-        decryptedUrl: decrypted.objectUrl
+        decryptedBlob: decrypted.decryptedBlob,
+        decryptedUrl: decrypted.objectUrl,
+        decryptedBuffer: decrypted.decryptedBuffer
       };
     } catch (err) {
-      console.error('[Doctor Retrieval Error]:', err);
+      console.error('[Record Retrieval Error]:', err);
       addToast(err.message || 'Access denied to record', 'error');
       throw err;
     } finally {
@@ -647,6 +672,9 @@ export function AppProvider({ children }) {
       authLoading,
       toasts,
       theme,
+      walletBalance,
+      refreshWalletBalance,
+      setWalletBalance,
       toggleTheme,
       signUp,
       signIn,

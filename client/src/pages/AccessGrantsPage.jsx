@@ -3,11 +3,12 @@ import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Shield, X, Share2, Clock, Search,
-  RefreshCw, AlertCircle, Check, Copy, ExternalLink
+  RefreshCw, AlertCircle, Check, Copy, ExternalLink, CreditCard
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatDate, formatRelativeTime, formatWallet, useCountdown } from '../hooks/useHelpers';
 import PageLayout from '../components/layout/PageLayout';
+import UpiTopUpModal from '../components/shared/UpiTopUpModal';
 import './AccessGrantsPage.css';
 
 function GrantCountdown({ expiresAt }) {
@@ -21,7 +22,7 @@ function GrantCountdown({ expiresAt }) {
 }
 
 export default function AccessGrantsPage() {
-  const { grants, records, loading, refreshRecords, revokeGrant, createGrant, addToast } = useApp();
+  const { grants, records, loading, refreshRecords, revokeGrant, createGrant, walletBalance, refreshWalletBalance, addToast } = useApp();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -30,10 +31,14 @@ export default function AccessGrantsPage() {
 
   // Grant creation inline form state
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showUpiModal, setShowUpiModal] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState('');
   const [doctorWallet, setDoctorWallet] = useState('');
   const [selectedExpiry, setSelectedExpiry] = useState(86400);
   const [isCreating, setIsCreating] = useState(false);
+
+  const GRANT_FEE = 0.10;
+  const hasSufficientFunds = (walletBalance || 0) >= GRANT_FEE;
 
   const expiryPresets = [
     { label: '1 Hour', value: 3600 },
@@ -212,6 +217,54 @@ export default function AccessGrantsPage() {
                 </div>
               </div>
 
+              {/* Wallet Fee & Top-Up Section */}
+              <div style={{
+                background: 'rgba(30, 41, 59, 0.6)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '12px',
+                padding: '0.85rem 1rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.4rem'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+                  <span style={{ color: '#94a3b8' }}>Grant Issuance Fee:</span>
+                  <strong style={{ color: '#38bdf8' }}>0.10 POL (₹50)</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
+                  <span style={{ color: '#94a3b8' }}>Your Vault Wallet Balance:</span>
+                  <strong style={{ color: hasSufficientFunds ? '#10b981' : '#f43f5e' }}>
+                    {(walletBalance || 0).toFixed(4)} POL
+                  </strong>
+                </div>
+              </div>
+
+              {!hasSufficientFunds && (
+                <div style={{
+                  background: 'rgba(244, 63, 94, 0.08)',
+                  border: '1px solid rgba(244, 63, 94, 0.3)',
+                  borderRadius: '12px',
+                  padding: '0.85rem 1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem'
+                }}>
+                  <AlertCircle size={20} color="#f43f5e" style={{ flexShrink: 0 }} />
+                  <div style={{ flex: 1, fontSize: '0.8rem', color: '#cbd5e1' }}>
+                    <span style={{ fontWeight: 600, color: '#f43f5e', display: 'block' }}>Insufficient Wallet Funds</span>
+                    0.10 POL (₹50) required to issue an access grant.
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => setShowUpiModal(true)}
+                    style={{ flexShrink: 0 }}
+                  >
+                    <CreditCard size={14} /> Top Up UPI
+                  </button>
+                </div>
+              )}
+
               <div className="grants-create-actions">
                 <button
                   type="button"
@@ -223,15 +276,29 @@ export default function AccessGrantsPage() {
                 <motion.button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={!selectedRecordId || !doctorWallet.trim() || isCreating}
+                  disabled={!selectedRecordId || !doctorWallet.trim() || isCreating || !hasSufficientFunds}
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                 >
-                  {isCreating ? 'Creating...' : 'Create Grant'}
+                  {isCreating ? 'Creating...' : (hasSufficientFunds ? 'Create Grant (0.10 POL)' : 'Top Up Wallet to Continue')}
                 </motion.button>
               </div>
             </form>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* UPI Top-Up Modal */}
+      <AnimatePresence>
+        {showUpiModal && (
+          <UpiTopUpModal
+            isOpen={showUpiModal}
+            onClose={() => setShowUpiModal(false)}
+            onSuccess={() => {
+              refreshWalletBalance();
+              addToast('Wallet credited! You can now create your grant.', 'success');
+            }}
+          />
         )}
       </AnimatePresence>
 

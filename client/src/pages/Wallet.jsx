@@ -3,11 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Wallet as WalletIcon, Send, ArrowUpRight, ArrowDownLeft, Copy, Check,
   ExternalLink, QrCode, RefreshCw, Sparkles, DollarSign, Clock,
-  ShieldCheck, AlertCircle, CheckCircle2, User, X
+  ShieldCheck, AlertCircle, CheckCircle2, User, X, CreditCard
 } from 'lucide-react';
 import { ethers } from 'ethers';
 import { useApp } from '../context/AppContext';
 import { CHAIN_CONFIG } from '../services/blockchain';
+import { api } from '../services/api';
+import UpiTopUpModal from '../components/shared/UpiTopUpModal';
 import './Wallet.css';
 
 const DEFAULT_TRANSACTIONS = [];
@@ -43,9 +45,33 @@ export default function Wallet() {
 
   // UI Modal State
   const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [showUpiModal, setShowUpiModal] = useState(false);
   const [copiedAddress, setCopiedAddress] = useState(false);
   const [copiedTx, setCopiedTx] = useState(null);
   const [txFilter, setTxFilter] = useState('all'); // 'all' | 'sent' | 'received'
+
+  // Synchronize balance & transactions with MongoDB Atlas
+  useEffect(() => {
+    let mounted = true;
+    api.getWalletBalance().then(res => {
+      if (mounted && typeof res?.balance === 'number') {
+        setBalance(res.balance);
+        if (Array.isArray(res.transactions) && res.transactions.length > 0) {
+          setTransactions(res.transactions.map(t => ({
+            id: t.tx_id || t.id,
+            type: t.type?.includes('DEBIT') ? 'sent' : 'received',
+            amount: t.amount?.toString() || '0.10',
+            token: 'POL',
+            memo: t.description || 'UPI Wallet Top-Up',
+            timestamp: t.created_at || new Date().toISOString(),
+            status: t.status?.toLowerCase() || 'confirmed',
+            txHash: t.payment_id || t.tx_id || '0xpay'
+          })));
+        }
+      }
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, [walletAddress]);
 
   // Persist balance
   useEffect(() => {
@@ -248,6 +274,20 @@ export default function Wallet() {
 
             {/* Quick Actions */}
             <div className="wallet-actions-bar">
+              <button
+                type="button"
+                className="btn-wallet-action btn-wallet-topup"
+                onClick={() => setShowUpiModal(true)}
+                style={{
+                  background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(59, 130, 246, 0.25))',
+                  borderColor: '#10b981',
+                  color: '#34d399',
+                  fontWeight: 600
+                }}
+                title="Top Up Vault Wallet via UPI (Razorpay)"
+              >
+                <CreditCard size={16} /> Top Up via UPI
+              </button>
               <button
                 type="button"
                 className="btn-wallet-action btn-wallet-send"
@@ -622,6 +662,19 @@ export default function Wallet() {
               </button>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* UPI Top-Up Modal */}
+      <AnimatePresence>
+        {showUpiModal && (
+          <UpiTopUpModal
+            isOpen={showUpiModal}
+            onClose={() => setShowUpiModal(false)}
+            onSuccess={(newBal) => {
+              if (typeof newBal === 'number') setBalance(newBal);
+            }}
+          />
         )}
       </AnimatePresence>
     </div>

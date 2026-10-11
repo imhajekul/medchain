@@ -31,6 +31,13 @@ import { getAuditTrail, getUserAuditLogs } from './controllers/audit.controller.
 import { retrieveRecordForDoctor } from './controllers/access.controller.js';
 import { handleAiChat } from './controllers/ai.controller.js';
 import { indexer } from './services/indexer.service.js';
+import {
+  createRazorpayOrder,
+  verifyRazorpayPayment,
+  handleRazorpayWebhook,
+  getWalletBalance,
+  getWalletTransactions
+} from './controllers/payment.controller.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -71,7 +78,12 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 
 // ─── Rate Limiting Protections ────────────────────────────────
 const generalLimiter = rateLimit({
@@ -197,6 +209,24 @@ app.get(['/security/info', '/api/security/info'], requireAuth, async (req, res) 
 
 // ─── Step 5 Extended Flow: Full Decryption Stream for Doctors ─
 app.get(['/records/:id/retrieve', '/api/records/:id/retrieve'], requireAuth, retrieveRecordForDoctor);
+
+// ─── Razorpay UPI Payment Gateway & Wallet Webhooks ──────────
+app.post(
+  ['/payments/razorpay/create-order', '/api/payments/razorpay/create-order', '/payment/create-order', '/api/payment/create-order'],
+  requireAuth,
+  createRazorpayOrder
+);
+app.post(
+  ['/payments/razorpay/verify', '/api/payments/razorpay/verify', '/payment/verify', '/api/payment/verify'],
+  requireAuth,
+  verifyRazorpayPayment
+);
+app.post(
+  ['/payments/razorpay/webhook', '/api/payments/razorpay/webhook', '/payment/webhook', '/api/payment/webhook'],
+  handleRazorpayWebhook
+);
+app.get(['/wallet/balance', '/api/wallet/balance'], requireAuth, getWalletBalance);
+app.get(['/wallet/transactions', '/api/wallet/transactions'], requireAuth, getWalletTransactions);
 
 // ─── AI Health Assistant & Clinical Copilot ──────────────────
 app.post(['/ai/chat', '/api/ai/chat'], handleAiChat);

@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   FileText, Upload, Search, X, Lock, ArrowRight,
-  Shield, Share2, RefreshCw, Filter, Grid, List
+  Shield, Share2, RefreshCw, Filter, Grid, List, Download
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatDate } from '../hooks/useHelpers';
@@ -11,13 +11,39 @@ import PageLayout from '../components/layout/PageLayout';
 import './RecordsPage.css';
 
 export default function RecordsPage() {
-  const { records, grants, stats, loading, refreshRecords, addToast } = useApp();
+  const { records, grants, stats, loading, refreshRecords, retrieveAndDecryptRecord, addToast } = useApp();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [viewMode, setViewMode] = useState('grid');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [fetchError, setFetchError] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
+
+  const handleQuickDownload = async (e, record) => {
+    e.stopPropagation();
+    const recId = record.id || record.recordId;
+    setDownloadingId(recId);
+    try {
+      const result = await retrieveAndDecryptRecord(recId);
+      const fileExt = (record.fileType || record.mimeType?.split('/')[1] || 'pdf').toLowerCase();
+      const safeLabel = (record.label || 'medical_record').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const downloadName = `${safeLabel}_decrypted.${fileExt}`;
+
+      const link = document.createElement('a');
+      link.href = result.decryptedUrl;
+      link.download = downloadName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      addToast(`Decrypted file ${downloadName} downloaded!`, 'success');
+    } catch (err) {
+      addToast(err.message || 'Failed to decrypt and download record', 'error');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -247,7 +273,20 @@ export default function RecordsPage() {
                       <Shield size={14} />
                       <span>{activeGrantsNum} active grant{activeGrantsNum !== 1 ? 's' : ''}</span>
                     </div>
-                    <ArrowRight size={16} className="record-card-arrow" />
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '4px 8px', fontSize: '0.75rem', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                        onClick={(e) => handleQuickDownload(e, record)}
+                        disabled={downloadingId === targetId}
+                        title="Download decrypted file directly"
+                      >
+                        <Download size={12} className={downloadingId === targetId ? 'spin-animation' : ''} />
+                        {downloadingId === targetId ? 'Decrypting...' : 'Decrypt'}
+                      </button>
+                      <ArrowRight size={16} className="record-card-arrow" />
+                    </div>
                   </div>
                 </motion.div>
               );
@@ -285,6 +324,16 @@ export default function RecordsPage() {
                     </span>
                   </div>
                   <div className="records-list-right">
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ padding: '4px 8px', fontSize: '0.75rem', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                      onClick={(e) => handleQuickDownload(e, record)}
+                      disabled={downloadingId === targetId}
+                    >
+                      <Download size={12} className={downloadingId === targetId ? 'spin-animation' : ''} />
+                      {downloadingId === targetId ? 'Decrypting...' : 'Decrypt & Download'}
+                    </button>
                     <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>
                       <Lock size={10} /> Encrypted
                     </span>

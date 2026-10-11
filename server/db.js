@@ -25,6 +25,8 @@ class MongoDatabase {
     this.access_grants = db.collection('access_grants');
     this.audit_logs = db.collection('audit_logs');
     this.indexer_state = db.collection('indexer_state');
+    this.payments = db.collection('payments');
+    this.wallet_transactions = db.collection('wallet_transactions');
     this.initIndexes();
   }
 
@@ -40,6 +42,10 @@ class MongoDatabase {
       await this.access_grants.createIndex({ grantee_address: 1 }, { background: true });
       await this.audit_logs.createIndex({ record_id_hex: 1 }, { background: true });
       await this.indexer_state.createIndex({ network: 1 }, { unique: true, background: true });
+      await this.payments.createIndex({ order_id: 1 }, { background: true });
+      await this.payments.createIndex({ payment_id: 1 }, { background: true });
+      await this.wallet_transactions.createIndex({ user_address: 1 }, { background: true });
+      await this.wallet_transactions.createIndex({ tx_id: 1 }, { background: true });
     } catch (e) {
       console.warn('⚠️ MongoDB indexing notice:', e.message);
     }
@@ -383,26 +389,181 @@ class MongoDatabase {
     return { rows: [], rowCount: 0 };
   }
 
+  async getUserWallet(walletAddress) {
+    const wallet = String(walletAddress || '').toLowerCase();
+    const user = await this.users.findOne({ wallet_address: wallet });
+    const balance = user && typeof user.wallet_balance === 'number' ? user.wallet_balance : 0.00;
+    const transactions = await this.wallet_transactions.find({ user_address: wallet }).sort({ created_at: -1 }).limit(50).toArray();
+    return {
+      walletAddress: wallet,
+      balance: Number(balance.toFixed(4)),
+      currency: 'POL',
+      transactions
+    };
+  }
+
+  async creditWalletBalance(walletAddress, amount, details = {}) {
+    const wallet = String(walletAddress || '').toLowerCase();
+    const polAmount = Number(amount);
+
+    await this.users.updateOne(
+      { wallet_address: wallet },
+      {
+        $inc: { wallet_balance: polAmount },
+        $setOnInsert: {
+          id: `usr_${Date.now()}`,
+          email: details.email || `${wallet.substring(0, 8)}@medvault.user`,
+          role: 'PATIENT',
+          created_at: new Date()
+        }
+      },
+      { upsert: true }
+    );
+
+    const tx = {
+      id: `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      tx_id: details.txId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      user_address: wallet,
+      type: details.type || 'CREDIT_UPI_TOPUP',
+      amount: polAmount,
+      amount_inr: details.amountInr || Math.round(polAmount * 500),
+      currency: details.currency || 'POL',
+      payment_id: details.paymentId || null,
+      order_id: details.orderId || null,
+      method: details.method || 'UPI (Razorpay)',
+      description: details.description || `Wallet top-up via UPI (${polAmount} POL)`,
+      status: 'COMPLETED',
+      created_at: new Date()
+    };
+    await this.wallet_transactions.insertOne(tx);
+
+    await this.audit_logs.insertOne({
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 4)}`,
+      actor_address: wallet,
+      action_type: 'WALLET_CREDIT',
+      context: `Credited ${polAmount} POL via UPI Razorpay (Tx: ${tx.id})`,
+      block_number: 14221060,
+      tx_hash: details.paymentId || `0xpay_${Date.now().toString(16)}`,
+      log_index: 0,
+      block_timestamp: new Date(),
+      created_at: new Date()
+    });
+
+    const updatedUser = await this.users.findOne({ wallet_address: wallet });
+    return {
+      success: true,
+      newBalance: Number((updatedUser?.wallet_balance || 0).toFixed(4)),
+      transaction: tx
+    };
+  }
+
+  async debitWalletBalance(walletAddress, amount, details = {}) {
+    const wallet = String(walletAddress || '').toLowerCase();
+    const polAmount = Number(amount);
+    const user = await this.users.findOne({ wallet_address: wallet });
+    const currentBal = user && typeof user.wallet_balance === 'number' ? user.wallet_balance : 0.00;
+
+    if (currentBal < polAmount) {
+      throw new Error(`Insufficient wallet balance. Required: ${polAmount} POL, Available: ${currentBal.toFixed(4)} POL`);
+    }
+
+    await this.users.updateOne(
+      { wallet_address: wallet },
+      { $inc: { wallet_balance: -polAmount } }
+    );
+
+    const tx = {
+      id: `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      tx_id: details.txId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      user_address: wallet,
+      type: details.type || 'DEBIT_GRANT_FEE',
+      amount: polAmount,
+      amount_inr: details.amountInr || Math.round(polAmount * 500),
+      currency: details.currency || 'POL',
+      grant_id: details.grantId || null,
+      record_id: details.recordId || null,
+      description: details.description || `Fee for issuing access grant (${polAmount} POL)`,
+      status: 'COMPLETED',
+      created_at: new Date()
+    };
+    await this.wallet_transactions.insertOne(tx);
+
+    await this.audit_logs.insertOne({
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 4)}`,
+      actor_address: wallet,
+      record_id_hex: details.recordId || null,
+      action_type: 'WALLET_DEBIT',
+      context: `Debited ${polAmount} POL for access grant (${tx.description})`,
+      block_number: 14221070,
+      tx_hash: `0xgrant_fee_${Date.now().toString(16)}`,
+      log_index: 0,
+      block_timestamp: new Date(),
+      created_at: new Date()
+    });
+
+    const updatedUser = await this.users.findOne({ wallet_address: wallet });
+    return {
+      success: true,
+      newBalance: Number((updatedUser?.wallet_balance || 0).toFixed(4)),
+      transaction: tx
+    };
+  }
+
+  async createPayment(paymentData) {
+    const doc = {
+      id: `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      order_id: paymentData.orderId,
+      user_address: String(paymentData.walletAddress || '').toLowerCase(),
+      amount_paise: paymentData.amountPaise,
+      amount_inr: paymentData.amountInr,
+      pol_amount: paymentData.polAmount,
+      currency: paymentData.currency || 'INR',
+      status: paymentData.status || 'CREATED',
+      method: paymentData.method || 'UPI',
+      notes: paymentData.notes || {},
+      created_at: new Date()
+    };
+    await this.payments.insertOne(doc);
+    return doc;
+  }
+
+  async updatePayment(orderId, updateData) {
+    const res = await this.payments.findOneAndUpdate(
+      { order_id: orderId },
+      { $set: { ...updateData, updated_at: new Date() } },
+      { returnDocument: 'after' }
+    );
+    return res;
+  }
+
+  async getPayment(orderId) {
+    return await this.payments.findOne({ order_id: orderId });
+  }
+
   async inspect() {
-    const [users, records, grants, auditLogs] = await Promise.all([
+    const [users, records, grants, auditLogs, payments, walletTxs] = await Promise.all([
       this.users.find({}, { projection: { password_hash: 0, salt: 0 } }).sort({ created_at: -1 }).limit(50).toArray(),
       this.records.find({}).sort({ created_at: -1 }).limit(50).toArray(),
       this.access_grants.find({}).sort({ created_at: -1 }).limit(50).toArray(),
-      this.audit_logs.find({}).sort({ created_at: -1 }).limit(50).toArray()
+      this.audit_logs.find({}).sort({ created_at: -1 }).limit(50).toArray(),
+      this.payments.find({}).sort({ created_at: -1 }).limit(50).toArray(),
+      this.wallet_transactions.find({}).sort({ created_at: -1 }).limit(50).toArray()
     ]);
 
     const counts = {
       users: await this.users.countDocuments(),
       records: await this.records.countDocuments(),
       grants: await this.access_grants.countDocuments(),
-      auditLogs: await this.audit_logs.countDocuments()
+      auditLogs: await this.audit_logs.countDocuments(),
+      payments: await this.payments.countDocuments(),
+      walletTransactions: await this.wallet_transactions.countDocuments()
     };
 
     return {
       activeDriver: 'mongodb-cluster',
       databaseName: this.db.databaseName,
       counts,
-      data: { users, records, grants, auditLogs }
+      data: { users, records, grants, auditLogs, payments, walletTransactions: walletTxs }
     };
   }
 }
@@ -419,6 +580,8 @@ class MemoryDatabase {
     this.encrypted_key_bundles = [];
     this.access_grants = [];
     this.audit_logs = [];
+    this.payments = [];
+    this.wallet_transactions = [];
     this.indexer_state = new Map([
       ['polygon-amoy', { last_indexed_block: 14221045, updated_at: new Date() }]
     ]);
@@ -724,6 +887,155 @@ class MemoryDatabase {
     return { rows: [], rowCount: 0 };
   }
 
+  async getUserWallet(walletAddress) {
+    const wallet = String(walletAddress || '').toLowerCase();
+    const user = this.users.find(u => u.wallet_address.toLowerCase() === wallet);
+    const balance = user && typeof user.wallet_balance === 'number' ? user.wallet_balance : 0.00;
+    const transactions = this.wallet_transactions
+      .filter(t => t.user_address.toLowerCase() === wallet)
+      .slice(-50)
+      .reverse();
+    return {
+      walletAddress: wallet,
+      balance: Number(balance.toFixed(4)),
+      currency: 'POL',
+      transactions
+    };
+  }
+
+  async creditWalletBalance(walletAddress, amount, details = {}) {
+    const wallet = String(walletAddress || '').toLowerCase();
+    const polAmount = Number(amount);
+    let user = this.users.find(u => u.wallet_address.toLowerCase() === wallet);
+
+    if (!user) {
+      user = {
+        id: `usr_${Date.now()}`,
+        email: details.email || `${wallet.substring(0, 8)}@medvault.user`,
+        role: 'PATIENT',
+        wallet_address: wallet,
+        wallet_balance: 0.00,
+        created_at: new Date()
+      };
+      this.users.push(user);
+    }
+
+    user.wallet_balance = (user.wallet_balance || 0.00) + polAmount;
+
+    const tx = {
+      id: `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      tx_id: details.txId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      user_address: wallet,
+      type: details.type || 'CREDIT_UPI_TOPUP',
+      amount: polAmount,
+      amount_inr: details.amountInr || Math.round(polAmount * 500),
+      currency: details.currency || 'POL',
+      payment_id: details.paymentId || null,
+      order_id: details.orderId || null,
+      method: details.method || 'UPI (Razorpay)',
+      description: details.description || `Wallet top-up via UPI (${polAmount} POL)`,
+      status: 'COMPLETED',
+      created_at: new Date()
+    };
+    this.wallet_transactions.unshift(tx);
+
+    this.audit_logs.unshift({
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 4)}`,
+      actor_address: wallet,
+      action_type: 'WALLET_CREDIT',
+      context: `Credited ${polAmount} POL via UPI Razorpay (Tx: ${tx.id})`,
+      block_number: 14221060,
+      tx_hash: details.paymentId || `0xpay_${Date.now().toString(16)}`,
+      log_index: 0,
+      block_timestamp: new Date(),
+      created_at: new Date()
+    });
+
+    return {
+      success: true,
+      newBalance: Number(user.wallet_balance.toFixed(4)),
+      transaction: tx
+    };
+  }
+
+  async debitWalletBalance(walletAddress, amount, details = {}) {
+    const wallet = String(walletAddress || '').toLowerCase();
+    const polAmount = Number(amount);
+    let user = this.users.find(u => u.wallet_address.toLowerCase() === wallet);
+    const currentBal = user && typeof user.wallet_balance === 'number' ? user.wallet_balance : 0.00;
+
+    if (currentBal < polAmount) {
+      throw new Error(`Insufficient wallet balance. Required: ${polAmount} POL, Available: ${currentBal.toFixed(4)} POL`);
+    }
+
+    user.wallet_balance -= polAmount;
+
+    const tx = {
+      id: `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      tx_id: details.txId || `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      user_address: wallet,
+      type: details.type || 'DEBIT_GRANT_FEE',
+      amount: polAmount,
+      amount_inr: details.amountInr || Math.round(polAmount * 500),
+      currency: details.currency || 'POL',
+      grant_id: details.grantId || null,
+      record_id: details.recordId || null,
+      description: details.description || `Fee for issuing access grant (${polAmount} POL)`,
+      status: 'COMPLETED',
+      created_at: new Date()
+    };
+    this.wallet_transactions.unshift(tx);
+
+    this.audit_logs.unshift({
+      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 4)}`,
+      actor_address: wallet,
+      record_id_hex: details.recordId || null,
+      action_type: 'WALLET_DEBIT',
+      context: `Debited ${polAmount} POL for access grant (${tx.description})`,
+      block_number: 14221070,
+      tx_hash: `0xgrant_fee_${Date.now().toString(16)}`,
+      log_index: 0,
+      block_timestamp: new Date(),
+      created_at: new Date()
+    });
+
+    return {
+      success: true,
+      newBalance: Number(user.wallet_balance.toFixed(4)),
+      transaction: tx
+    };
+  }
+
+  async createPayment(paymentData) {
+    const doc = {
+      id: `pay_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      order_id: paymentData.orderId,
+      user_address: String(paymentData.walletAddress || '').toLowerCase(),
+      amount_paise: paymentData.amountPaise,
+      amount_inr: paymentData.amountInr,
+      pol_amount: paymentData.polAmount,
+      currency: paymentData.currency || 'INR',
+      status: paymentData.status || 'CREATED',
+      method: paymentData.method || 'UPI',
+      notes: paymentData.notes || {},
+      created_at: new Date()
+    };
+    this.payments.unshift(doc);
+    return doc;
+  }
+
+  async updatePayment(orderId, updateData) {
+    const p = this.payments.find(pay => pay.order_id === orderId);
+    if (p) {
+      Object.assign(p, updateData, { updated_at: new Date() });
+    }
+    return p;
+  }
+
+  async getPayment(orderId) {
+    return this.payments.find(pay => pay.order_id === orderId) || null;
+  }
+
   async inspect() {
     return {
       activeDriver: 'in-memory-fallback',
@@ -732,13 +1044,17 @@ class MemoryDatabase {
         users: this.users.length,
         records: this.records.length,
         grants: this.access_grants.length,
-        auditLogs: this.audit_logs.length
+        auditLogs: this.audit_logs.length,
+        payments: this.payments.length,
+        walletTransactions: this.wallet_transactions.length
       },
       data: {
         users: this.users.map(({ password_hash, salt, ...rest }) => rest),
         records: this.records,
         grants: this.access_grants,
-        auditLogs: this.audit_logs
+        auditLogs: this.audit_logs,
+        payments: this.payments,
+        walletTransactions: this.wallet_transactions
       }
     };
   }
@@ -833,6 +1149,36 @@ export const db = {
   inspectDatabase: async () => {
     if (mongoDb) return await mongoDb.inspect();
     return await memoryDb.inspect();
+  },
+
+  getUserWallet: async (walletAddress) => {
+    if (mongoDb) return await mongoDb.getUserWallet(walletAddress);
+    return await memoryDb.getUserWallet(walletAddress);
+  },
+
+  creditWalletBalance: async (walletAddress, amount, details) => {
+    if (mongoDb) return await mongoDb.creditWalletBalance(walletAddress, amount, details);
+    return await memoryDb.creditWalletBalance(walletAddress, amount, details);
+  },
+
+  debitWalletBalance: async (walletAddress, amount, details) => {
+    if (mongoDb) return await mongoDb.debitWalletBalance(walletAddress, amount, details);
+    return await memoryDb.debitWalletBalance(walletAddress, amount, details);
+  },
+
+  createPayment: async (paymentData) => {
+    if (mongoDb) return await mongoDb.createPayment(paymentData);
+    return await memoryDb.createPayment(paymentData);
+  },
+
+  updatePayment: async (orderId, updateData) => {
+    if (mongoDb) return await mongoDb.updatePayment(orderId, updateData);
+    return await memoryDb.updatePayment(orderId, updateData);
+  },
+
+  getPayment: async (orderId) => {
+    if (mongoDb) return await mongoDb.getPayment(orderId);
+    return await memoryDb.getPayment(orderId);
   },
 
   getMongoDb: () => mongoDbInstance,
