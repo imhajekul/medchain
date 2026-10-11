@@ -222,7 +222,14 @@ app.post(
   verifyRazorpayPayment
 );
 app.post(
-  ['/payments/razorpay/webhook', '/api/payments/razorpay/webhook', '/payment/webhook', '/api/payment/webhook'],
+  [
+    '/payments/razorpay/webhook',
+    '/api/payments/razorpay/webhook',
+    '/payment/webhook',
+    '/api/payment/webhook',
+    '/webhooks/razorpay',
+    '/api/webhooks/razorpay'
+  ],
   handleRazorpayWebhook
 );
 app.get(['/wallet/balance', '/api/wallet/balance'], requireAuth, getWalletBalance);

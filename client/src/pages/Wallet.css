@@ -150,17 +150,6 @@
   transform: translateY(-2px);
 }
 
-.btn-wallet-faucet {
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.25);
-  color: #34d399;
-}
-
-.btn-wallet-faucet:hover {
-  background: rgba(16, 185, 129, 0.2);
-  transform: translateY(-2px);
-}
-
 /* Transfer Form Container */
 .transfer-card {
   background: var(--color-bg-glass);

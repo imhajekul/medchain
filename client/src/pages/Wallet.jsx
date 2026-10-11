@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Wallet as WalletIcon, Send, ArrowUpRight, ArrowDownLeft, Copy, Check,
-  ExternalLink, QrCode, RefreshCw, Sparkles, DollarSign, Clock,
+  ExternalLink, QrCode, RefreshCw, DollarSign, Clock,
   ShieldCheck, AlertCircle, CheckCircle2, User, X, CreditCard
 } from 'lucide-react';
 import { ethers } from 'ethers';
@@ -15,7 +15,7 @@ import './Wallet.css';
 const DEFAULT_TRANSACTIONS = [];
 
 export default function Wallet() {
-  const { user, addToast } = useApp();
+  const { user, addToast, refreshWalletBalance } = useApp();
   const walletAddress = (user?.walletAddress || '0x03c588972886f3456789abcdef0123456789abcdef').toLowerCase();
 
   // Balance & State
@@ -50,28 +50,37 @@ export default function Wallet() {
   const [copiedTx, setCopiedTx] = useState(null);
   const [txFilter, setTxFilter] = useState('all'); // 'all' | 'sent' | 'received'
 
-  // Synchronize balance & transactions with MongoDB Atlas
-  useEffect(() => {
-    let mounted = true;
-    api.getWalletBalance().then(res => {
-      if (mounted && typeof res?.balance === 'number') {
+  // Authoritative server wallet synchronization (MongoDB Atlas)
+  const loadWalletData = useCallback(async () => {
+    try {
+      const res = await api.getWalletBalance();
+      if (typeof res?.balance === 'number') {
         setBalance(res.balance);
-        if (Array.isArray(res.transactions) && res.transactions.length > 0) {
-          setTransactions(res.transactions.map(t => ({
-            id: t.tx_id || t.id,
-            type: t.type?.includes('DEBIT') ? 'sent' : 'received',
-            amount: t.amount?.toString() || '0.10',
-            token: 'POL',
-            memo: t.description || 'UPI Wallet Top-Up',
-            timestamp: t.created_at || new Date().toISOString(),
-            status: t.status?.toLowerCase() || 'confirmed',
-            txHash: t.payment_id || t.tx_id || '0xpay'
-          })));
-        }
       }
-    }).catch(() => {});
-    return () => { mounted = false; };
+      if (Array.isArray(res?.transactions)) {
+        setTransactions(res.transactions.map(t => ({
+          id: t.tx_id || t.id || `tx_${Math.random()}`,
+          type: t.type?.includes('DEBIT') ? 'sent' : 'received',
+          from: t.from || t.method || 'Razorpay UPI Gateway',
+          to: t.to || walletAddress,
+          provider: t.method || 'Razorpay UPI Gateway',
+          recipientLabel: t.recipientLabel || (t.grantee ? `Doctor Grant (${t.grantee.substring(0, 10)}...)` : undefined),
+          amount: (t.amount !== undefined ? t.amount : 0.10).toString(),
+          token: t.currency || 'POL',
+          memo: t.description || (t.type?.includes('DEBIT') ? 'Access Grant Creation Fee' : 'UPI Wallet Top-Up'),
+          timestamp: t.created_at || t.timestamp || new Date().toISOString(),
+          status: t.status?.toLowerCase() || 'confirmed',
+          txHash: t.payment_id || t.tx_id || t.order_id || '0xpay'
+        })));
+      }
+    } catch (err) {
+      console.warn('[Wallet] Sync notice:', err.message);
+    }
   }, [walletAddress]);
+
+  useEffect(() => {
+    loadWalletData();
+  }, [loadWalletData]);
 
   // Persist balance
   useEffect(() => {
@@ -102,29 +111,6 @@ export default function Wallet() {
     setRecipient(addr);
     if (note) setMemo(note);
     setFormError('');
-  };
-
-  // Claim Faucet / Testnet Funds
-  const handleClaimFaucet = () => {
-    const claimAmt = 1.0;
-    const newBal = balance + claimAmt;
-    setBalance(newBal);
-
-    const faucetTx = {
-      id: `tx_${Date.now()}`,
-      type: 'received',
-      from: '0x0000...Faucet',
-      to: 'self',
-      amount: claimAmt.toFixed(4),
-      token: selectedToken,
-      memo: 'Polygon Amoy Testnet Faucet Claim',
-      txHash: `0x${Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, '0')).join('')}`,
-      timestamp: new Date().toISOString(),
-      status: 'confirmed'
-    };
-
-    setTransactions(prev => [faucetTx, ...prev]);
-    addToast(`Received +${claimAmt} ${selectedToken} from Testnet Faucet!`, 'success');
   };
 
   // Submit Money Transfer
@@ -301,14 +287,6 @@ export default function Wallet() {
                 onClick={() => setShowReceiveModal(true)}
               >
                 <QrCode size={16} /> Receive
-              </button>
-              <button
-                type="button"
-                className="btn-wallet-action btn-wallet-faucet"
-                onClick={handleClaimFaucet}
-                title="Claim free testnet POL tokens"
-              >
-                <Sparkles size={16} /> +1.0 Faucet
               </button>
             </div>
           </div>
@@ -553,13 +531,17 @@ export default function Wallet() {
                     </div>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <span>{tx.type === 'sent' ? `Sent to ${tx.recipientLabel || tx.to.substring(0, 10) + '...'}` : `Received from ${tx.from}`}</span>
+                        <span>
+                          {tx.type === 'sent'
+                            ? `Sent to ${tx.recipientLabel || (tx.to && typeof tx.to === 'string' ? (tx.to.startsWith('0x') ? `${tx.to.substring(0, 10)}...` : tx.to) : 'Recipient')}`
+                            : `Received via ${tx.from || tx.provider || 'Razorpay UPI Gateway'}`}
+                        </span>
                         <span className="tx-badge-confirmed">
                           <CheckCircle2 size={10} /> Confirmed
                         </span>
                       </div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
-                        {tx.memo} • {new Date(tx.timestamp).toLocaleString()}
+                        {tx.memo || 'Wallet Transaction'} • {new Date(tx.timestamp).toLocaleString()}
                       </div>
                     </div>
                   </div>
@@ -570,7 +552,9 @@ export default function Wallet() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.35rem', marginTop: '2px' }}>
                       <span style={{ fontSize: '0.7rem', color: 'var(--color-text-tertiary)', fontFamily: 'monospace' }}>
-                        {tx.txHash.substring(0, 8)}...{tx.txHash.substring(tx.txHash.length - 6)}
+                        {tx.txHash && tx.txHash.length > 14
+                          ? `${tx.txHash.substring(0, 8)}...${tx.txHash.substring(tx.txHash.length - 6)}`
+                          : (tx.txHash || 'N/A')}
                       </span>
                       <button
                         type="button"
@@ -670,9 +654,12 @@ export default function Wallet() {
         {showUpiModal && (
           <UpiTopUpModal
             isOpen={showUpiModal}
-            onClose={() => setShowUpiModal(false)}
-            onSuccess={(newBal) => {
-              if (typeof newBal === 'number') setBalance(newBal);
+            onClose={() => {
+              setShowUpiModal(false);
+              loadWalletData();
+            }}
+            onSuccess={() => {
+              loadWalletData();
             }}
           />
         )}
