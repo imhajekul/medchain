@@ -51,6 +51,35 @@ function PatientRoute({ children }) {
   return children;
 }
 
+// Doctor portal route — requires doctor credentials
+function DoctorRoute({ children }) {
+  const { isConnected, authLoading, user } = useApp();
+  if (authLoading) {
+    return (
+      <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--color-primary, #6366f1)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      </div>
+    );
+  }
+  if (!isConnected) return <Navigate to="/auth?mode=signin&role=doctor" replace />;
+  if (user?.role === 'patient') return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
+// General authenticated route — requires signed-in session (e.g., Database, AI Copilot)
+function AuthenticatedRoute({ children }) {
+  const { isConnected, authLoading } = useApp();
+  if (authLoading) {
+    return (
+      <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--color-primary, #6366f1)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      </div>
+    );
+  }
+  if (!isConnected) return <Navigate to="/auth?mode=signin" replace />;
+  return children;
+}
+
 // Guest-only route — redirects to appropriate role portal if already signed in
 function GuestRoute({ children }) {
   const { isConnected, authLoading, user } = useApp();
@@ -98,13 +127,19 @@ function AnimatedRoutes() {
           </PatientRoute>
         } />
         <Route path="/doctor-access" element={
-          <PageTransition><DoctorAccess /></PageTransition>
+          <DoctorRoute>
+            <PageTransition><DoctorAccess /></PageTransition>
+          </DoctorRoute>
         } />
         <Route path="/assistant" element={
-          <PageTransition><AiAssistant /></PageTransition>
+          <AuthenticatedRoute>
+            <PageTransition><AiAssistant /></PageTransition>
+          </AuthenticatedRoute>
         } />
         <Route path="/database" element={
-          <PageTransition><DatabaseViewer /></PageTransition>
+          <AuthenticatedRoute>
+            <PageTransition><DatabaseViewer /></PageTransition>
+          </AuthenticatedRoute>
         } />
         <Route path="*" element={
           <PageTransition><NotFound /></PageTransition>
