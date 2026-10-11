@@ -3,8 +3,14 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import { db } from './db.js';
 import { requireAuth } from './middleware/auth.js';
@@ -173,6 +179,26 @@ app.get('/api/stats', (req, res) => {
     storageUsed: '776 KB'
   });
 });
+
+// ─── Optional Frontend Static Serving (if built locally) ─────
+const clientDist = path.join(__dirname, '../client/dist');
+if (fs.existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get('*', (req, res, next) => {
+    if (
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/auth') ||
+      req.path.startsWith('/records') ||
+      req.path.startsWith('/grants') ||
+      req.path.startsWith('/audit') ||
+      req.path.startsWith('/health') ||
+      req.path.startsWith('/ready')
+    ) {
+      return next();
+    }
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
 
 // ─── Centralized Error Handler ────────────────────────────────
 app.use((err, req, res, next) => {

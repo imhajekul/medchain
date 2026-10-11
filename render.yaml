@@ -1,17 +1,17 @@
 # ==============================================================================
-# Render Blueprint: MedVault Core Backend & PostgreSQL
-# Optimized for Frontend on Vercel + Backend on Render Architecture
+# Render Blueprint: Full-Stack MedVault on Render
+# Frontend: Static Site (CDN) | Backend: Web Service (Node.js) | DB: PostgreSQL
 # ==============================================================================
 
 services:
-  # ─── MedVault Core API Web Service ──────────────────────────────
+  # ─── 1. MedVault Backend Web Service ────────────────────────────
   - type: web
     name: medvault-api
     runtime: node
     rootDir: server
     buildCommand: npm install && npx prisma generate
     startCommand: node index.js
-    plan: free # Can be upgraded to 'starter' or 'standard' for production SLAs
+    plan: free # or 'starter'
     healthCheckPath: /health
     autoDeploy: true
     envVars:
@@ -28,13 +28,36 @@ services:
       - key: CONTRACT_ADDRESS
         value: 0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6
       - key: RELAYER_PRIVATE_KEY
-        sync: false # Set securely in Render dashboard
+        sync: false
       - key: CORS_ORIGIN
-        value: "*" # Permits Vercel domains, or specify your exact *.vercel.app domain
+        value: "*"
       - key: RATE_LIMIT_MAX
         value: "1000"
 
-# ─── Managed PostgreSQL Database on Render ─────────────────────────
+  # ─── 2. MedVault Frontend Static Site (React + Vite) ─────────────
+  - type: web
+    name: medvault-client
+    env: static
+    rootDir: client
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: medvault-api
+          property: host
+      - key: VITE_CHAIN_ID
+        value: "80002"
+      - key: VITE_CONTRACT_ADDRESS
+        value: "0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6"
+
+# ─── 3. Managed PostgreSQL Database ────────────────────────────────
 databases:
   - name: medvault-db
     databaseName: medvault
