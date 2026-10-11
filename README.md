@@ -51,7 +51,27 @@ Judges can evaluate MedVault immediately on the [Live Demo](https://medchain-rus
 
 ---
 
-## 📐 System Architecture Overview
+## 🗺️ Dedicated Page Routing & Feature Architecture
+
+MedVault features a modular full-page routing architecture with seamless state transitions:
+
+| Route | Feature Area | Description | Backing Data |
+| :--- | :--- | :--- | :--- |
+| **`/dashboard`** | Patient Dashboard | High-level vault overview, quick metrics, sync triggers, and navigation shortcuts | `records`, `access_grants` |
+| **`/records`** | Medical Records Explorer | Search, MIME filter, and Grid/List toggle for all encrypted personal health records | `records` collection |
+| **`/records/upload`** | Upload & Encryption Studio | In-browser 256-bit AES-GCM client encryption and encrypted IPFS blob upload | `records`, `encrypted_key_bundles` |
+| **`/records/:id`** | Decrypted Record Detail | In-memory verified decryption, envelope inspection, and active doctor grants | `records`, `access_grants` |
+| **`/grants`** | Access & Doctor Sharing | Real-time permissions manager, live countdown timers, and instant revocation | `access_grants` collection |
+| **`/activity`** | Activity & Audit Logs | Tamper-proof cryptographic access logs and Polygon Amoy explorer verification | `audit_logs` collection |
+| **`/security`** | Key Management & Security | Key bundle inspection, cipher suite posture, and zero-exposure invariants | `encrypted_key_bundles` |
+| **`/settings`** | Account & Profile | Google OAuth profile details, sovereign wallet address, and UI preferences | `users` collection |
+| **`/wallet`** | Sovereign EVM Wallet | Freshly initialized (0.00 POL) wallet with testnet faucet and P2P transfers | Sovereign EVM / LocalState |
+| **`/doctor-access`** | Healthcare Provider Portal | Doctor access portal for authorized record retrieval and in-memory decryption | `access_grants` |
+| **`/assistant`** | AI Clinical Copilot | Zero-exposure clinical AI assistant for patient record guidance | AI Assistant API |
+
+---
+
+## 📐 System Architecture & Cryptographic Pipeline
 
 ```
                       ┌──────────────────────────────────────────────┐

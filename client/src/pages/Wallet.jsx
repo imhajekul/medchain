@@ -10,33 +10,7 @@ import { useApp } from '../context/AppContext';
 import { CHAIN_CONFIG } from '../services/blockchain';
 import './Wallet.css';
 
-const DEFAULT_TRANSACTIONS = [
-  {
-    id: 'tx_init_1',
-    type: 'received',
-    from: '0x1a8f93...459e (MedVault Faucet)',
-    to: 'self',
-    amount: '2.5000',
-    token: 'POL',
-    memo: 'Initial Sovereign Vault Allocation',
-    txHash: '0x3a82fbc8921e491cba09e872c019d87e0294158129a8e976c9b5d21094ba4521',
-    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
-    status: 'confirmed'
-  },
-  {
-    id: 'tx_init_2',
-    type: 'sent',
-    from: 'self',
-    to: '0xC57Ffa753e4D93F109EDa60aBfBBCEd083001b98',
-    recipientLabel: 'Dr. Sarah Chen (Consultation)',
-    amount: '0.2500',
-    token: 'POL',
-    memo: 'Specialist Consultation Fee',
-    txHash: '0xc03c8b99538fd800a7b451e067a6d8d672ea4f183c5180629a43a6d71b30f81a',
-    timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
-    status: 'confirmed'
-  }
-];
+const DEFAULT_TRANSACTIONS = [];
 
 export default function Wallet() {
   const { user, addToast } = useApp();
@@ -48,15 +22,15 @@ export default function Wallet() {
 
   const [balance, setBalance] = useState(() => {
     const saved = localStorage.getItem(storageKey);
-    return saved ? parseFloat(saved) : 2.25;
+    return saved ? parseFloat(saved) : 0.00;
   });
 
   const [transactions, setTransactions] = useState(() => {
     const saved = localStorage.getItem(txStorageKey);
     if (saved) {
-      try { return JSON.parse(saved); } catch { return DEFAULT_TRANSACTIONS; }
+      try { return JSON.parse(saved); } catch { return []; }
     }
-    return DEFAULT_TRANSACTIONS;
+    return [];
   });
 
   // Transfer Form State
