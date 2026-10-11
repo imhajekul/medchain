@@ -221,7 +221,7 @@ export default function Auth() {
             </div>
           </div>
 
-          {/* Continue with Google Option (Firebase OAuth) */}
+          {/* One-Click Firebase Google Registration & Authentication */}
           <div className="auth-google-wrapper">
             <motion.button
               type="button"
@@ -232,12 +232,14 @@ export default function Auth() {
               whileTap={{ scale: 0.99 }}
             >
               <GoogleIcon />
-              <span>
-                {isRegister ? 'Register with Google' : 'Continue with Google'}
-                <span className="google-role-sub">
-                  ({role === 'doctor' ? 'Doctor' : 'Patient'})
+              <div className="google-btn-content">
+                <span className="google-btn-main">
+                  {isRegister ? '1-Click Register with Google' : '1-Click Sign In with Google'}
                 </span>
-              </span>
+                <span className="google-role-sub">
+                  Firebase Auth • {role === 'doctor' ? 'Healthcare Provider' : 'Patient Portal'}
+                </span>
+              </div>
             </motion.button>
           </div>
 

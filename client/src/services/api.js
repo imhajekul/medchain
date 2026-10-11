@@ -71,6 +71,10 @@ export const api = {
     return data;
   },
 
+  async firebaseAuth(firebaseData, role = 'patient') {
+    return this.googleAuth(firebaseData, role);
+  },
+
   // --- Step 2: Web3 Authentication ---
   async getNonce() {
     const res = await fetch(`${API_BASE}/auth/nonce`);

@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { api } from '../services/api';
-import { authenticateWithGoogle } from '../services/firebase';
+import { authenticateWithGoogle, firebaseSignOut } from '../services/firebase';
 import { encryptFileClientSide, decryptFileClientSide } from '../crypto/aes';
 
 const AppContext = createContext(null);
@@ -284,6 +284,7 @@ export function AppProvider({ children }) {
     setIsConnected(false);
     setUser(null);
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    firebaseSignOut().catch(() => {});
     addToast('Signed out successfully', 'info');
   }, [addToast]);
 
