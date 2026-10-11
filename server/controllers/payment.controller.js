@@ -2,25 +2,29 @@ import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { db } from '../db.js';
 
-const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || '';
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || '';
-const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || '';
-
 // Conversion rate: 1 POL = 500 INR (0.10 POL = 50 INR)
 const POL_INR_RATE = 500;
 
-// Initialize official Razorpay SDK instance
-const razorpay = new Razorpay({
-  key_id: RAZORPAY_KEY_ID || 'rzp_test_placeholder',
-  key_secret: RAZORPAY_KEY_SECRET || 'placeholder_secret'
-});
-
 /**
  * POST /api/payment/create-order
- * Creates a Razorpay UPI order and stores an initial pending payment record in MongoDB.
+ * Creates a real Razorpay UPI order and stores an initial pending payment record in MongoDB.
  */
 export async function createRazorpayOrder(req, res) {
   try {
+    const keyId = process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+    if (!keyId || !keySecret || keyId.includes('placeholder')) {
+      return res.status(400).json({
+        error: 'Razorpay Gateway is not configured. Please define RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in server/.env.'
+      });
+    }
+
+    const razorpay = new Razorpay({
+      key_id: keyId,
+      key_secret: keySecret
+    });
+
     const user = req.user;
     const walletAddress = (req.body.walletAddress || user?.walletAddress || '').toLowerCase();
     const userId = req.body.userId || user?.id || (walletAddress ? `usr_${walletAddress.slice(2, 10)}` : 'usr_default');
@@ -35,39 +39,21 @@ export async function createRazorpayOrder(req, res) {
     }
 
     // Token equivalent (e.g. ₹50 -> 0.1 POL, ₹100 -> 0.2 POL, ₹250 -> 0.5 POL)
-    const tokenCredit = amountInINR === 50 ? "0.1" : (amountInINR === 100 ? "0.2" : (amountInINR / POL_INR_RATE).toFixed(4).toString());
+    const tokenCredit = amountInINR === 50 ? "0.1" : (amountInINR === 100 ? "0.2" : (amountInINR === 250 ? "0.5" : (amountInINR / POL_INR_RATE).toFixed(4).toString()));
     const amountInPaise = Math.round(amountInINR * 100);
     const receipt = `rcpt_${Date.now()}`;
 
-    let order;
-    if (RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET && !RAZORPAY_KEY_ID.includes('placeholder')) {
-      try {
-        order = await razorpay.orders.create({
-          amount: amountInPaise,
-          currency: "INR",
-          receipt,
-          notes: {
-            walletAddress,
-            userId: String(userId),
-            tokenCredit
-          }
-        });
-      } catch (sdkErr) {
-        console.warn('⚠️ Razorpay orders.create upstream notice:', sdkErr.message);
-        // Fallback order generation if credentials not yet provisioned on live gateway
-        order = {
-          id: `order_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-          amount: amountInPaise,
-          currency: "INR"
-        };
+    // Real order creation via official Razorpay SDK
+    const order = await razorpay.orders.create({
+      amount: amountInPaise,
+      currency: "INR",
+      receipt,
+      notes: {
+        walletAddress,
+        userId: String(userId),
+        tokenCredit
       }
-    } else {
-      order = {
-        id: `order_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-        amount: amountInPaise,
-        currency: "INR"
-      };
-    }
+    });
 
     // Store initial payment record in MongoDB with status "pending"
     await db.createPayment({
@@ -97,23 +83,16 @@ export async function createRazorpayOrder(req, res) {
       txHash: order.id
     });
 
-    const hasValidKeys = Boolean(
-      (process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID) &&
-      (process.env.RAZORPAY_KEY_SECRET || RAZORPAY_KEY_SECRET) &&
-      !String(process.env.RAZORPAY_KEY_ID || RAZORPAY_KEY_ID).includes('placeholder')
-    );
-
     return res.status(200).json({
       orderId: order.id,
       amount: order.amount,
       currency: order.currency || "INR",
-      keyId: hasValidKeys ? (process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID) : null,
-      isConfigured: hasValidKeys,
+      keyId,
       polAmount: Number(tokenCredit)
     });
   } catch (err) {
     console.error('[Create Razorpay Order Error]:', err);
-    return res.status(500).json({ error: 'Failed to create payment order', details: err.message });
+    return res.status(500).json({ error: 'Failed to create Razorpay payment order', details: err.message });
   }
 }
 
@@ -270,72 +249,6 @@ export async function verifyRazorpayPayment(req, res) {
   } catch (err) {
     console.error('[Verify Payment Error]:', err);
     return res.status(500).json({ error: 'Failed to verify payment', details: err.message });
-  }
-}
-
-/**
- * POST /api/payment/simulate
- * Simulates a successful UPI webhook payment when testing in sandbox without live Razorpay keys.
- * Performs the exact same MongoDB atomic balance increment, payment confirmation, and audit log creation.
- */
-export async function simulateRazorpayPayment(req, res) {
-  try {
-    const { orderId } = req.body;
-    if (!orderId) {
-      return res.status(400).json({ error: 'orderId is required.' });
-    }
-
-    const payment = await db.getPayment(orderId);
-    if (!payment) {
-      return res.status(404).json({ error: 'Payment order not found.' });
-    }
-
-    if (payment.status === 'confirmed') {
-      return res.status(200).json({ status: 'ok', message: 'Already processed', confirmed: true });
-    }
-
-    const paymentId = `pay_sim_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const targetWallet = payment.user_address || payment.walletAddress;
-    const tokenCredit = Number(payment.pol_amount) || (payment.amount_inr === 50 ? 0.1 : Number((payment.amount_inr / POL_INR_RATE).toFixed(4)));
-
-    if (targetWallet) {
-      // Update payment status to "confirmed"
-      await db.updatePayment(orderId, {
-        payment_id: paymentId,
-        status: "confirmed",
-        webhook_event: "payment.captured (sandbox)",
-        confirmed_at: new Date()
-      });
-
-      // Atomically increment the user's POL balance in MongoDB
-      await db.creditWalletBalance(targetWallet, tokenCredit, {
-        paymentId,
-        orderId,
-        amountInr: payment.amount_inr,
-        method: 'Received via UPI (Razorpay Verified)',
-        from: 'Razorpay UPI Gateway (Sandbox)',
-        description: `Received via UPI (Razorpay Verified) • ${tokenCredit} POL (₹${payment.amount_inr})`
-      });
-
-      // Record verified event in audit_logs
-      await db.logAuditEvent({
-        actorAddress: targetWallet,
-        actionType: 'PAYMENT_CONFIRMED',
-        context: 'Received via UPI (Razorpay Verified)',
-        txHash: paymentId
-      });
-    }
-
-    return res.status(200).json({
-      status: 'ok',
-      paymentId,
-      orderId,
-      polAmount: tokenCredit,
-      confirmed: true
-    });
-  } catch (err) {
-    console.error('[Simulate Payment Error]:', err);
-    return res.status(500).json({ error: 'Failed to simulate payment', details: err.message });
   }
 }
 

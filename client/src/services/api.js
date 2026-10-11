@@ -297,17 +297,6 @@ export const api = {
     return handleApiResponse(res, 'Failed to fetch payment status');
   },
 
-  async simulatePayment(orderId) {
-    const res = await fetch(`${API_BASE}/payment/simulate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders()
-      },
-      body: JSON.stringify({ orderId })
-    });
-    return handleApiResponse(res, 'Failed to simulate payment');
-  },
 
   async verifyRazorpayPayment(paymentData) {
     const res = await fetch(`${API_BASE}/payment/verify`, {

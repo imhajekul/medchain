@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CreditCard, Smartphone, CheckCircle2, AlertCircle, X,
-  ShieldCheck, ArrowRight, RefreshCw, AlertTriangle, Lock
+  ShieldCheck, ArrowRight, RefreshCw
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useApp } from '../../context/AppContext';
@@ -20,7 +20,6 @@ export default function UpiTopUpModal({ isOpen, onClose, onSuccess, initialAmoun
   const [selectedInr, setSelectedInr] = useState(initialAmountInr);
   const [customInr, setCustomInr] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [testModeNotice, setTestModeNotice] = useState(null);
   const [isAwaitingWebhook, setIsAwaitingWebhook] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -53,144 +52,121 @@ export default function UpiTopUpModal({ isOpen, onClose, onSuccess, initialAmoun
         throw new Error('Minimum top-up amount is ₹10.');
       }
 
-      // 1. Request real order from backend (/api/payment/create-order)
+      // 1. Request real Razorpay order from backend (/api/payment/create-order)
       const walletAddress = user?.walletAddress || user?.address || '';
       const userId = user?.id || user?.userId || '';
       const order = await api.createRazorpayOrder(currentAmountInr, walletAddress, userId);
 
       if (!order || !order.orderId) {
-        throw new Error('Failed to create Razorpay payment order.');
+        throw new Error(order?.error || 'Failed to create Razorpay payment order.');
+      }
+
+      const activeKeyId = order.keyId || import.meta.env.VITE_RAZORPAY_KEY_ID;
+      if (!activeKeyId) {
+        throw new Error('Razorpay Gateway is not configured. Please add RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET to server/.env');
       }
 
       const polEquivalent = currentAmountInr === 50 ? 0.1 : (currentAmountInr === 250 ? 0.5 : Number((currentAmountInr / 500).toFixed(4)));
 
-      const activeKeyId = order.keyId || import.meta.env.VITE_RAZORPAY_KEY_ID || import.meta.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
-      const hasLiveGateway = Boolean(order.isConfigured && activeKeyId && !activeKeyId.includes('placeholder'));
+      // 2. Load official Razorpay Checkout SDK
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded || !window.Razorpay) {
+        throw new Error('Failed to load Razorpay payment gateway script. Please check your internet connection.');
+      }
 
-      // If Razorpay live/test keys are configured in server/.env, open official Razorpay Checkout SDK
-      if (hasLiveGateway) {
-        const scriptLoaded = await loadRazorpayScript();
-        if (!scriptLoaded || !window.Razorpay) {
-          throw new Error('Failed to load Razorpay payment gateway script. Please check your internet connection.');
-        }
-
-        const options = {
-          key: activeKeyId,
-          amount: order.amount,
-          currency: order.currency || 'INR',
-          name: 'MedVault Healthcare',
-          description: `Vault Wallet Top-Up (${polEquivalent} POL)`,
-          order_id: order.orderId,
-          prefill: {
-            name: user?.name || 'MedVault User',
-            email: user?.email || 'patient@medvault.app',
-            contact: ''
-          },
-          theme: {
-            color: '#3b82f6'
-          },
-          handler: async function (response) {
-            setIsProcessing(false);
-            setIsAwaitingWebhook(true);
-
-            try {
-              if (response.razorpay_signature) {
-                try {
-                  await api.verifyRazorpayPayment({
-                    razorpay_order_id: response.razorpay_order_id,
-                    razorpay_payment_id: response.razorpay_payment_id,
-                    razorpay_signature: response.razorpay_signature
-                  });
-                } catch (signErr) {
-                  console.warn('[Client signature verification notice]:', signErr);
-                }
-              }
-
-              // Poll server for webhook confirmation (/api/payment/status)
-              let confirmed = false;
-              let attempts = 0;
-              const maxAttempts = 15;
-
-              while (attempts < maxAttempts) {
-                await new Promise(r => setTimeout(r, 2000));
-                attempts++;
-
-                try {
-                  const statusRes = await api.getPaymentStatus(order.orderId);
-                  if (statusRes && (statusRes.confirmed || statusRes.status === 'confirmed')) {
-                    confirmed = true;
-                    const balData = await refreshWalletBalance();
-                    setPaymentSuccess({
-                      amountInr: currentAmountInr,
-                      polAmount: statusRes.polAmount || polEquivalent,
-                      txId: response.razorpay_payment_id || statusRes.paymentId || order.orderId,
-                      newBalance: balData?.balance,
-                      provider: 'Razorpay UPI Gateway'
-                    });
-                    if (onSuccess) onSuccess(balData?.balance);
-                    break;
-                  }
-                } catch (pollErr) {
-                  console.warn('[Polling payment status error]:', pollErr);
-                }
-              }
-
-              if (!confirmed) {
-                await refreshWalletBalance();
-                addToast('Payment captured. Vault balance will update automatically upon webhook confirmation.', 'info');
-                setIsAwaitingWebhook(false);
-                onClose();
-              }
-            } catch (verErr) {
-              console.error('[Payment Handler Error]:', verErr);
-              setErrorMsg(verErr.message || 'Error awaiting payment confirmation.');
-              addToast(verErr.message || 'Payment status check encountered an issue', 'error');
-            } finally {
-              setIsAwaitingWebhook(false);
-              setIsProcessing(false);
-            }
-          },
-          modal: {
-            ondismiss: function () {
-              setIsProcessing(false);
-              setIsAwaitingWebhook(false);
-              addToast('Payment checkout closed. No funds were debited or credited.', 'info');
-            }
-          }
-        };
-
-        const rzp = new window.Razorpay(options);
-        rzp.on('payment.failed', function (resp) {
+      // 3. Launch official Razorpay Checkout popup
+      const options = {
+        key: activeKeyId,
+        amount: order.amount,
+        currency: order.currency || 'INR',
+        name: 'MedVault Healthcare',
+        description: `Vault Wallet Top-Up (${polEquivalent} POL)`,
+        order_id: order.orderId,
+        prefill: {
+          name: user?.name || 'MedVault User',
+          email: user?.email || 'patient@medvault.app',
+          contact: ''
+        },
+        theme: {
+          color: '#3b82f6'
+        },
+        handler: async function (response) {
           setIsProcessing(false);
-          setIsAwaitingWebhook(false);
-          addToast(`Payment failed: ${resp.error?.description || 'Payment was cancelled or failed'}`, 'error');
-        });
-        rzp.open();
-        return;
-      }
+          setIsAwaitingWebhook(true);
 
-      // Fallback: If RAZORPAY_KEY_ID is not configured in server/.env, execute Sandbox UPI simulation
-      // This verifies the full end-to-end database balance crediting and audit log pipeline in MongoDB Atlas
-      setIsProcessing(false);
-      setIsAwaitingWebhook(true);
+          try {
+            if (response.razorpay_signature) {
+              try {
+                await api.verifyRazorpayPayment({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature
+                });
+              } catch (signErr) {
+                console.warn('[Client signature verification notice]:', signErr);
+              }
+            }
 
-      // Brief delay to simulate UPI banking response
-      await new Promise(r => setTimeout(r, 1200));
+            // Poll server for webhook confirmation (/api/payment/status)
+            let confirmed = false;
+            let attempts = 0;
+            const maxAttempts = 20;
 
-      const simRes = await api.simulatePayment(order.orderId);
-      if (simRes && (simRes.confirmed || simRes.status === 'ok')) {
-        const balData = await refreshWalletBalance();
-        setPaymentSuccess({
-          amountInr: currentAmountInr,
-          polAmount: simRes.polAmount || polEquivalent,
-          txId: simRes.paymentId || `pay_sim_${Date.now()}`,
-          newBalance: balData?.balance,
-          provider: 'Razorpay UPI Gateway (Sandbox)'
-        });
-        if (onSuccess) onSuccess(balData?.balance);
-      } else {
-        throw new Error('Simulation failed to credit wallet.');
-      }
+            while (attempts < maxAttempts) {
+              await new Promise(r => setTimeout(r, 2000));
+              attempts++;
+
+              try {
+                const statusRes = await api.getPaymentStatus(order.orderId);
+                if (statusRes && (statusRes.confirmed || statusRes.status === 'confirmed')) {
+                  confirmed = true;
+                  const balData = await refreshWalletBalance();
+                  setPaymentSuccess({
+                    amountInr: currentAmountInr,
+                    polAmount: statusRes.polAmount || polEquivalent,
+                    txId: response.razorpay_payment_id || statusRes.paymentId || order.orderId,
+                    newBalance: balData?.balance,
+                    provider: 'Razorpay UPI Gateway'
+                  });
+                  if (onSuccess) onSuccess(balData?.balance);
+                  break;
+                }
+              } catch (pollErr) {
+                console.warn('[Polling payment status error]:', pollErr);
+              }
+            }
+
+            if (!confirmed) {
+              await refreshWalletBalance();
+              addToast('Payment captured. Vault balance will update automatically upon webhook confirmation.', 'info');
+              setIsAwaitingWebhook(false);
+              onClose();
+            }
+          } catch (verErr) {
+            console.error('[Payment Handler Error]:', verErr);
+            setErrorMsg(verErr.message || 'Error awaiting payment confirmation.');
+            addToast(verErr.message || 'Payment status check encountered an issue', 'error');
+          } finally {
+            setIsAwaitingWebhook(false);
+            setIsProcessing(false);
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            setIsProcessing(false);
+            setIsAwaitingWebhook(false);
+            addToast('Payment checkout closed. No funds were debited or credited.', 'info');
+          }
+        }
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', function (resp) {
+        setIsProcessing(false);
+        setIsAwaitingWebhook(false);
+        addToast(`Payment failed: ${resp.error?.description || 'Payment was cancelled or failed'}`, 'error');
+      });
+      rzp.open();
     } catch (err) {
       console.error('[UPI Payment Error]:', err);
       setErrorMsg(err.message || 'Failed to initiate UPI checkout');
@@ -201,7 +177,6 @@ export default function UpiTopUpModal({ isOpen, onClose, onSuccess, initialAmoun
   };
 
   const resetModal = () => {
-    setTestModeNotice(null);
     setPaymentSuccess(null);
     setIsAwaitingWebhook(false);
     setErrorMsg(null);
@@ -233,53 +208,7 @@ export default function UpiTopUpModal({ isOpen, onClose, onSuccess, initialAmoun
           </button>
         </div>
 
-        {/* View 1: Test Mode Warning Card (No Artificial Credits) */}
-        {testModeNotice ? (
-          <div className="upi-test-mode-view">
-            <div className="upi-test-mode-icon">
-              <AlertTriangle size={48} />
-            </div>
-            <h3 className="upi-test-mode-title">UPI Gateway in Test Mode</h3>
-            <p className="upi-test-mode-subtitle">
-              <strong>Real funds transfer is disabled.</strong>
-            </p>
-            <p className="upi-test-mode-desc">
-              Live Razorpay credentials (<code>RAZORPAY_KEY_ID</code> &amp; <code>RAZORPAY_KEY_SECRET</code>)
-              are not yet configured on this server. In accordance with MedVault security invariants,
-              artificial client-side tokens and unverified mock balances are strictly disabled.
-            </p>
-
-            <div className="upi-receipt-card">
-              <div className="upi-receipt-row">
-                <span>Order Reference:</span>
-                <code>{testModeNotice.orderId}</code>
-              </div>
-              <div className="upi-receipt-row">
-                <span>Requested Amount:</span>
-                <span>₹{testModeNotice.amountInr} ({testModeNotice.polAmount} POL)</span>
-              </div>
-              <div className="upi-receipt-row">
-                <span>Gateway Status:</span>
-                <span className="badge badge-warning" style={{ background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24' }}>
-                  Test Mode • Zero Artificial Credit
-                </span>
-              </div>
-              <div className="upi-receipt-row">
-                <span>Action Required:</span>
-                <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Add Razorpay API keys to server <code>.env</code></span>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              className="btn btn-secondary btn-lg"
-              style={{ width: '100%', marginTop: '1.5rem' }}
-              onClick={resetModal}
-            >
-              Acknowledge &amp; Close
-            </button>
-          </div>
-        ) : paymentSuccess ? (
+        {paymentSuccess ? (
           /* View 2: Verified Webhook Payment Success */
           <div className="upi-success-view">
             <motion.div
