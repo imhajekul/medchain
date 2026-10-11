@@ -10,9 +10,21 @@ const MEDVAULT_ACCESS_ABI = [
 ];
 
 if (process.env.RPC_URL && process.env.RELAYER_PRIVATE_KEY && process.env.CONTRACT_ADDRESS) {
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-  relayerWallet = new ethers.Wallet(process.env.RELAYER_PRIVATE_KEY, provider);
-  medVaultContract = new ethers.Contract(process.env.CONTRACT_ADDRESS, MEDVAULT_ACCESS_ABI, relayerWallet);
+  try {
+    const rawKey = String(process.env.RELAYER_PRIVATE_KEY).trim();
+    if (rawKey && (rawKey.length === 64 || rawKey.length === 66) && !rawKey.includes('your_relayer') && !rawKey.includes('0x0000')) {
+      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+      relayerWallet = new ethers.Wallet(rawKey, provider);
+      if (ethers.isAddress(process.env.CONTRACT_ADDRESS)) {
+        medVaultContract = new ethers.Contract(process.env.CONTRACT_ADDRESS, MEDVAULT_ACCESS_ABI, relayerWallet);
+      }
+      console.log(`⚡ Relayer wallet initialized: ${relayerWallet.address}`);
+    } else {
+      console.log('ℹ️  Relayer wallet in simulation mode (RELAYER_PRIVATE_KEY is unconfigured or placeholder).');
+    }
+  } catch (err) {
+    console.warn('⚠️  Could not initialize relayer wallet (invalid key). Continuing in simulation mode:', err.message);
+  }
 }
 
 /**

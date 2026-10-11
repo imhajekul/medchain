@@ -12,13 +12,22 @@ const PERMISSIONS_VAULT_ABI = [
 ];
 
 if (process.env.RPC_URL && process.env.RELAYER_PRIVATE_KEY && process.env.PERMISSIONS_VAULT_ADDRESS) {
-  const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-  relayerWallet = new ethers.Wallet(process.env.RELAYER_PRIVATE_KEY, provider);
-  permissionsContract = new ethers.Contract(
-    process.env.PERMISSIONS_VAULT_ADDRESS,
-    PERMISSIONS_VAULT_ABI,
-    relayerWallet
-  );
+  try {
+    const rawKey = String(process.env.RELAYER_PRIVATE_KEY).trim();
+    if (rawKey && (rawKey.length === 64 || rawKey.length === 66) && !rawKey.includes('your_relayer') && !rawKey.includes('0x0000')) {
+      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+      relayerWallet = new ethers.Wallet(rawKey, provider);
+      if (ethers.isAddress(process.env.PERMISSIONS_VAULT_ADDRESS)) {
+        permissionsContract = new ethers.Contract(
+          process.env.PERMISSIONS_VAULT_ADDRESS,
+          PERMISSIONS_VAULT_ABI,
+          relayerWallet
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️  Could not initialize permissions relayer (invalid key). Continuing in simulation mode:', err.message);
+  }
 }
 
 /**
