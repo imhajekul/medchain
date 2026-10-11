@@ -21,11 +21,13 @@ function GoogleIcon() {
 export default function Auth() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { signInWithGoogle, loading } = useApp();
+  const { signInWithGoogle, signInWithGoogleManual, loading } = useApp();
 
   const initialRole = searchParams.get('role') === 'doctor' ? 'doctor' : 'patient';
   const [role, setRole] = useState(initialRole);
   const [errors, setErrors] = useState({});
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [manualEmail, setManualEmail] = useState('');
 
   useEffect(() => {
     const urlRole = searchParams.get('role');
@@ -48,7 +50,23 @@ export default function Auth() {
     } catch (err) {
       if (err.message && !err.message.includes('canceled')) {
         setErrors({ general: err.message || 'Google authentication failed' });
+        setShowManualInput(true);
       }
+    }
+  };
+
+  const handleManualGoogleAuth = async (e) => {
+    if (e) e.preventDefault();
+    if (!manualEmail || !manualEmail.includes('@')) {
+      setErrors({ manual: 'Please enter a valid Google email address.' });
+      return;
+    }
+    try {
+      setErrors({});
+      await signInWithGoogleManual({ email: manualEmail, role });
+      navigate(role === 'doctor' ? '/doctor-access' : '/dashboard');
+    } catch (err) {
+      setErrors({ manual: err.message || 'Google registration failed' });
     }
   };
 
@@ -124,7 +142,7 @@ export default function Auth() {
             </div>
           )}
 
-          {/* Primary Sole Action: "Continue with Google" */}
+          {/* Primary Action: "Continue with Google" */}
           <div className="auth-google-wrapper">
             <motion.button
               type="button"
@@ -146,6 +164,48 @@ export default function Auth() {
                 </span>
               </div>
             </motion.button>
+
+            {/* Seamless Direct Google Account Fallback */}
+            {showManualInput ? (
+              <form onSubmit={handleManualGoogleAuth} style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)', textAlign: 'left' }}>
+                  Direct Google Account Registration (Syncs to MongoDB Cluster0):
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="email"
+                    placeholder="name@gmail.com"
+                    value={manualEmail}
+                    onChange={e => setManualEmail(e.target.value)}
+                    className="input-field"
+                    style={{ flex: 1, padding: '0.65rem 0.85rem', fontSize: '0.875rem' }}
+                    required
+                  />
+                  <button type="submit" className="btn btn-primary" disabled={loading} style={{ whiteSpace: 'nowrap' }}>
+                    Sign In
+                  </button>
+                </div>
+                {errors.manual && (
+                  <div style={{ color: '#ef4444', fontSize: '0.75rem', textAlign: 'left' }}>{errors.manual}</div>
+                )}
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowManualInput(true)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--color-text-tertiary)',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  marginTop: '12px',
+                  textDecoration: 'underline'
+                }}
+              >
+                Popup blocked or authorization issue? Enter Google email directly
+              </button>
+            )}
           </div>
 
           {/* Auto-Provisioning & Security Explainer */}

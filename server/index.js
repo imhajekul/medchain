@@ -256,46 +256,54 @@ app.use((err, req, res, next) => {
 });
 
 // ─── Server Bootstrap & Graceful Shutdown ─────────────────────
-const server = app.listen(PORT, () => {
-  console.log(`\n  🛡️  MedVault Principal Backend running on port ${PORT}`);
-  console.log(`  🔒 Security Invariant: Zero Plaintext PHI Exposure Enforced`);
-  console.log(`  📋 API Specification Endpoints Ready:`);
-  console.log(`     GET    /auth/nonce               (SIWE Nonce Issue)`);
-  console.log(`     POST   /auth/connect             (SIWE Challenge Verification)`);
-  console.log(`     POST   /records                  (Client-Side Encrypted Upload)`);
-  console.log(`     GET    /records/:id              (Owner-Scoped Record Metadata)`);
-  console.log(`     POST   /grants                   (Time-Boxed Grant Creation)`);
-  console.log(`     GET    /grants/:id               (Grant Status & Auto-Expiry)`);
-  console.log(`     GET    /grants/:id/decrypt-key   (Grantee Key Envelope)`);
-  console.log(`     DELETE /grants/:id               (Early Manual Revocation)`);
-  console.log(`     GET    /audit/:recordId          (Fast-Read On-Chain Audit Feed)`);
-  console.log(`     GET    /health & /ready          (Container Probes)\n`);
+let server = null;
+if (!process.env.VERCEL) {
+  server = app.listen(PORT, () => {
+    console.log(`\n  🛡️  MedVault Principal Backend running on port ${PORT}`);
+    console.log(`  🔒 Security Invariant: Zero Plaintext PHI Exposure Enforced`);
+    console.log(`  📋 API Specification Endpoints Ready:`);
+    console.log(`     GET    /auth/nonce               (SIWE Nonce Issue)`);
+    console.log(`     POST   /auth/connect             (SIWE Challenge Verification)`);
+    console.log(`     POST   /records                  (Client-Side Encrypted Upload)`);
+    console.log(`     GET    /records/:id              (Owner-Scoped Record Metadata)`);
+    console.log(`     POST   /grants                   (Time-Boxed Grant Creation)`);
+    console.log(`     GET    /grants/:id               (Grant Status & Auto-Expiry)`);
+    console.log(`     GET    /grants/:id/decrypt-key   (Grantee Key Envelope)`);
+    console.log(`     DELETE /grants/:id               (Early Manual Revocation)`);
+    console.log(`     GET    /audit/:recordId          (Fast-Read On-Chain Audit Feed)`);
+    console.log(`     GET    /health & /ready          (Container Probes)\n`);
 
-  indexer.start();
-});
-
-const gracefulShutdown = (signal) => {
-  console.log(`\n🛑 Received ${signal}. Initiating graceful shutdown...`);
-  server.close(async () => {
-    console.log('HTTP connection pool closed.');
-    try {
-      if (indexer && typeof indexer.stop === 'function') {
-        indexer.stop();
-      }
-      await db.end();
-      console.log('Database connections cleanly terminated.');
-      process.exit(0);
-    } catch (e) {
-      console.error('Error during shutdown clean-up:', e);
-      process.exit(1);
-    }
+    indexer.start();
   });
 
-  setTimeout(() => {
-    console.error('Forced shutdown timeout reached. Terminating process.');
-    process.exit(1);
-  }, 10000).unref();
-};
+  const gracefulShutdown = (signal) => {
+    console.log(`\n🛑 Received ${signal}. Initiating graceful shutdown...`);
+    if (server) {
+      server.close(async () => {
+        console.log('HTTP connection pool closed.');
+        try {
+          if (indexer && typeof indexer.stop === 'function') {
+            indexer.stop();
+          }
+          await db.end();
+          console.log('Database connections cleanly terminated.');
+          process.exit(0);
+        } catch (e) {
+          console.error('Error during shutdown clean-up:', e);
+          process.exit(1);
+        }
+      });
+    }
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    setTimeout(() => {
+      console.error('Forced shutdown timeout reached. Terminating process.');
+      process.exit(1);
+    }, 10000).unref();
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+}
+
+export { app };
+export default app;

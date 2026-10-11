@@ -38,19 +38,6 @@
 
 ---
 
-## ⚡ Quick Evaluator Demo Logins (One-Click Testing)
-
-Judges can evaluate MedVault immediately on the [Live Demo](https://medchain-rust.vercel.app/) using pre-seeded evaluator accounts or by clicking the **"Quick 1-Click Judge Evaluation"** buttons on the login screen:
-
-| Role | Email | Password | What You Can Test |
-|:---|:---|:---|:---|
-| 👤 **Patient** | `patient@medvault.io` | `Password123!` | Upload encrypted medical files, view records, generate auto-expiring doctor access grants, inspect real-time audit logs. |
-| 🩺 **Doctor** | `doctor@medvault.io` | `Password123!` | Access patient-granted records, trigger automated decryption via recipient key envelopes, log verifiable review events. |
-
-*(You can also register a brand new account or connect using MetaMask / Web3 wallet!)*
-
----
-
 ## 🗺️ Dedicated Page Routing & Feature Architecture
 
 MedVault features a modular full-page routing architecture with seamless state transitions:

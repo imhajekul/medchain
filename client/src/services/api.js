@@ -5,12 +5,9 @@
 
 function resolveApiBase() {
   const envUrl = import.meta.env.VITE_API_URL;
-  if (envUrl) {
+  if (envUrl && envUrl.startsWith('https://')) {
     const trimmed = envUrl.replace(/\/+$/, '');
     return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
-  }
-  if (typeof window !== 'undefined' && window.location.port === '5173') {
-    return 'http://localhost:3001/api';
   }
   return '/api';
 }

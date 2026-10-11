@@ -5,8 +5,11 @@ let mongoClient = null;
 let mongoDbInstance = null;
 let pool = null;
 
+const ATLAS_CLUSTER_URI = 'mongodb://kironkanna96_db_user:WLNT7vQy73aPNaCG@ac-1uxuup1-shard-00-00.tqeiwfl.mongodb.net:27017,ac-1uxuup1-shard-00-01.tqeiwfl.mongodb.net:27017,ac-1uxuup1-shard-00-02.tqeiwfl.mongodb.net:27017/medvault?ssl=true&replicaSet=atlas-1vr6nn-shard-0&authSource=admin&retryWrites=true&w=majority';
+
 const mongoUri = process.env.MONGODB_URI || 
-  (process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('mongodb://') || process.env.DATABASE_URL.startsWith('mongodb+srv://')) ? process.env.DATABASE_URL : null);
+  (process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('mongodb://') || process.env.DATABASE_URL.startsWith('mongodb+srv://')) ? process.env.DATABASE_URL : null) ||
+  ATLAS_CLUSTER_URI;
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
@@ -95,16 +98,23 @@ class MongoDatabase {
 
     // 2. Encrypted key bundles insertion
     if (q.startsWith('INSERT INTO encrypted_key_bundles')) {
-      const bundle = {
-        id: `bundle_${Date.now()}`,
+      const filter = {
         record_id_hex: params[0],
-        recipient_address: params[1].toLowerCase(),
-        encrypted_key_material: params[2],
-        key_algorithm: params[3] || 'ECIES-secp256k1',
-        created_at: new Date()
+        recipient_address: params[1].toLowerCase()
       };
-      await this.encrypted_key_bundles.insertOne(bundle);
-      return { rows: [bundle], rowCount: 1 };
+      const update = {
+        $set: {
+          encrypted_key_material: params[2],
+          key_algorithm: params[3] || 'ECIES-secp256k1',
+          updated_at: new Date()
+        },
+        $setOnInsert: {
+          id: `bundle_${Date.now()}`,
+          created_at: new Date()
+        }
+      };
+      await this.encrypted_key_bundles.updateOne(filter, update, { upsert: true });
+      return { rows: [{ ...filter, encrypted_key_material: params[2] }], rowCount: 1 };
     }
 
     // 3. Access grants insertion
