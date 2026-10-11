@@ -11,7 +11,7 @@ import { useApp } from '../../context/AppContext';
 import './Navbar.css';
 
 export default function Navbar() {
-  const { isConnected, user, disconnectWallet, theme, toggleTheme, records, grants, stats, addToast } = useApp();
+  const { isConnected, user, disconnectWallet, signOut, theme, toggleTheme, records, grants, stats, addToast } = useApp();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [activityModalOpen, setActivityModalOpen] = useState(false);
@@ -70,10 +70,11 @@ export default function Navbar() {
           { path: '/wallet', label: 'Wallet', icon: <WalletIcon size={16} /> },
         ];
 
-  const handleDisconnect = () => {
-    disconnectWallet();
+  const handleDisconnect = async () => {
     setProfileOpen(false);
-    navigate('/');
+    setMobileOpen(false);
+    await (signOut || disconnectWallet)();
+    navigate('/auth?mode=signin&role=patient', { replace: true });
   };
 
   return (

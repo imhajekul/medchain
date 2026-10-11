@@ -12,7 +12,7 @@ import PageLayout from '../components/layout/PageLayout';
 import './SettingsPage.css';
 
 export default function SettingsPage() {
-  const { user, isConnected, theme, toggleTheme, disconnectWallet, records, grants, addToast } = useApp();
+  const { user, isConnected, theme, toggleTheme, disconnectWallet, signOut, records, grants, addToast } = useApp();
   const navigate = useNavigate();
   const [copiedWallet, setCopiedWallet] = useState(false);
   const [autoSync, setAutoSync] = useState(true);
@@ -25,9 +25,9 @@ export default function SettingsPage() {
     setTimeout(() => setCopiedWallet(false), 2000);
   };
 
-  const handleSignOut = () => {
-    disconnectWallet();
-    navigate('/');
+  const handleSignOut = async () => {
+    await (signOut || disconnectWallet)();
+    navigate('/auth?mode=signin&role=patient', { replace: true });
   };
 
   const handleExportProfile = () => {

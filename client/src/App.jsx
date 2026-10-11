@@ -51,7 +51,7 @@ function PatientRoute({ children }) {
       </div>
     );
   }
-  if (!isConnected) return <Navigate to="/auth?mode=signin&role=patient" replace />;
+  if (!isConnected || !user) return <Navigate to="/auth?mode=signin&role=patient" replace />;
   if (user?.role === 'doctor') return <Navigate to="/doctor-access" replace />;
   return children;
 }
@@ -66,14 +66,14 @@ function DoctorRoute({ children }) {
       </div>
     );
   }
-  if (!isConnected) return <Navigate to="/auth?mode=signin&role=doctor" replace />;
+  if (!isConnected || !user) return <Navigate to="/auth?mode=signin&role=doctor" replace />;
   if (user?.role === 'patient') return <Navigate to="/dashboard" replace />;
   return children;
 }
 
 // General authenticated route — requires signed-in session (e.g., Database, AI Copilot)
 function AuthenticatedRoute({ children }) {
-  const { isConnected, authLoading } = useApp();
+  const { isConnected, authLoading, user } = useApp();
   if (authLoading) {
     return (
       <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center' }}>
@@ -81,7 +81,7 @@ function AuthenticatedRoute({ children }) {
       </div>
     );
   }
-  if (!isConnected) return <Navigate to="/auth?mode=signin" replace />;
+  if (!isConnected || !user) return <Navigate to="/auth?mode=signin" replace />;
   return children;
 }
 
@@ -95,7 +95,7 @@ function GuestRoute({ children }) {
       </div>
     );
   }
-  if (isConnected) {
+  if (isConnected && user) {
     return <Navigate to={user?.role === 'doctor' ? '/doctor-access' : '/dashboard'} replace />;
   }
   return children;
@@ -106,7 +106,7 @@ function AnimatedRoutes() {
   const location = useLocation();
 
   return (
-    <AnimatePresence mode="wait">
+    <AnimatePresence mode="wait" initial={false}>
       <Routes location={location} key={location.pathname}>
         <Route path="/" element={
           <PageTransition><Landing /></PageTransition>

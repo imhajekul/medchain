@@ -438,11 +438,15 @@ export function AppProvider({ children }) {
     return signIn({ role });
   }, [signIn]);
 
-  const disconnectWallet = useCallback(() => {
+  const signOut = useCallback(async () => {
+    // Ensure all pending loading states and credentials are immediately reset
+    setLoading(false);
+    setAuthLoading(false);
     setIsConnected(false);
     setUser(null);
     setRecords([]);
     setGrants([]);
+    setAuditEvents([]);
     setStats({
       totalRecords: 0,
       activeGrants: 0,
@@ -450,15 +454,29 @@ export function AppProvider({ children }) {
       totalAccesses: 0,
       storageUsed: '0 KB'
     });
-    localStorage.removeItem(AUTH_STORAGE_KEY);
+
     try {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      sessionStorage.clear();
       if (typeof document !== 'undefined') {
         document.cookie = 'medvault_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
       }
-    } catch (e) {}
-    firebaseSignOut().catch(() => {});
+    } catch (e) {
+      console.warn('[SignOut Storage Cleanup]:', e);
+    }
+
+    try {
+      await firebaseSignOut();
+    } catch (e) {
+      console.warn('[Firebase SignOut]:', e);
+    }
+
     addToast('Signed out successfully', 'info');
   }, [addToast]);
+
+  const disconnectWallet = signOut;
+  const logout = signOut;
+
 
   // =========================================================================
   // STEP 3: Client-Side AES-256-GCM Encryption & Upload
@@ -685,6 +703,8 @@ export function AppProvider({ children }) {
       signInWithGoogleManual,
       connectWallet,
       disconnectWallet,
+      signOut,
+      logout,
       refreshRecords,
       uploadRecord,
       createGrant,
