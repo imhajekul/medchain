@@ -5,8 +5,6 @@ let mongoClient = null;
 let mongoDbInstance = null;
 let pool = null;
 
-const ATLAS_CLUSTER_URI = 'mongodb://kironkanna96_db_user:WLNT7vQy73aPNaCG@ac-1uxuup1-shard-00-00.tqeiwfl.mongodb.net:27017,ac-1uxuup1-shard-00-01.tqeiwfl.mongodb.net:27017,ac-1uxuup1-shard-00-02.tqeiwfl.mongodb.net:27017/medvault?ssl=true&replicaSet=atlas-1vr6nn-shard-0&authSource=admin&retryWrites=true&w=majority';
-
 const mongoUri = process.env.MONGODB_URI || 
   (process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('mongodb://') || process.env.DATABASE_URL.startsWith('mongodb+srv://')) ? process.env.DATABASE_URL : null) ||
   ATLAS_CLUSTER_URI;
