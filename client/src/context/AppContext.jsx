@@ -1,3 +1,5 @@
+'use client';
+
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { ethers } from 'ethers';
 import { api } from '../services/api';

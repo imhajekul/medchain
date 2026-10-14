@@ -4,21 +4,21 @@ import { AppProvider, useApp } from './context/AppContext';
 import Navbar from './components/layout/Navbar';
 import ToastContainer from './components/shared/Toast';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
-import Landing from './pages/Landing';
-import Auth from './pages/Auth';
-import Dashboard from './pages/Dashboard';
-import UploadRecord from './pages/UploadRecord';
-import RecordDetail from './pages/RecordDetail';
-import RecordsPage from './pages/RecordsPage';
-import AccessGrantsPage from './pages/AccessGrantsPage';
-import ActivityPage from './pages/ActivityPage';
-import SecurityPage from './pages/SecurityPage';
-import SettingsPage from './pages/SettingsPage';
-import DoctorAccess from './pages/DoctorAccess';
-import AiAssistant from './pages/AiAssistant';
-import Wallet from './pages/Wallet';
+import Landing from './views/Landing';
+import Auth from './views/Auth';
+import Dashboard from './views/Dashboard';
+import UploadRecord from './views/UploadRecord';
+import RecordDetail from './views/RecordDetail';
+import RecordsPage from './views/RecordsPage';
+import AccessGrantsPage from './views/AccessGrantsPage';
+import ActivityPage from './views/ActivityPage';
+import SecurityPage from './views/SecurityPage';
+import SettingsPage from './views/SettingsPage';
+import DoctorAccess from './views/DoctorAccess';
+import AiAssistant from './views/AiAssistant';
+import Wallet from './views/Wallet';
 import AiAssistantWidget from './components/shared/AiAssistantWidget';
-import NotFound from './pages/NotFound';
+import NotFound from './views/NotFound';
 
 // Page transition wrapper
 const pageVariants = {

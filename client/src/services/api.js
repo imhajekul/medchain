@@ -4,7 +4,8 @@
  */
 
 function resolveApiBase() {
-  const envUrl = import.meta.env.VITE_API_URL;
+  const envUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ||
+    (typeof process !== 'undefined' && (process.env?.NEXT_PUBLIC_API_URL || process.env?.VITE_API_URL));
   if (envUrl && envUrl.startsWith('https://')) {
     const trimmed = envUrl.replace(/\/+$/, '');
     return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
@@ -15,7 +16,7 @@ function resolveApiBase() {
 const API_BASE = resolveApiBase();
 
 export function getAuthHeaders() {
-  const saved = localStorage.getItem('medvault_auth');
+  const saved = typeof window !== 'undefined' ? localStorage.getItem('medvault_auth') : null;
   if (saved) {
     try {
       const parsed = JSON.parse(saved);

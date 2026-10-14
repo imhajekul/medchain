@@ -1,3 +1,5 @@
+'use client';
+
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ChevronRight, AlertCircle } from 'lucide-react';
