@@ -85,8 +85,12 @@ export default function Auth() {
       await signInWithGoogle(role);
       navigate(role === 'doctor' ? '/doctor-access' : '/dashboard', { replace: true });
     } catch (err) {
-      if (err.message && !err.message.includes('canceled')) {
-        setErrors({ general: err.message || 'Google authentication failed' });
+      const msg = err.message || '';
+      if (msg.includes('closed') || msg.includes('popup')) {
+        setErrors({ general: 'Google sign-in popup was closed. You can retry or enter your Google email directly below.' });
+        setShowManualInput(true);
+      } else if (!msg.includes('canceled')) {
+        setErrors({ general: msg || 'Google authentication failed' });
         setShowManualInput(true);
       }
     }

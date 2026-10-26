@@ -21,6 +21,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body>
         <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="afterInteractive" />
+        <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
         <Providers>
           {children}
         </Providers>

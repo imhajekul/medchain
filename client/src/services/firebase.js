@@ -9,6 +9,7 @@ import {
   signInWithEmailAndPassword,
   signOut
 } from 'firebase/auth';
+import { signInWithGoogleOAuth } from './googleAuth.js';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyD20b39V8VPJklKIAUOuFwnALPCRPSPYX8",
@@ -25,9 +26,24 @@ export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 /**
- * Initiates 1-Click Google Sign-In & Registration via Firebase popup.
+ * Initiates 1-Click Google Sign-In & Registration via Google Identity Services OAuth 2.0
+ * with fallback to Firebase popup.
  */
 export async function authenticateWithGoogle() {
+  // 1. Prioritize direct Google OAuth 2.0 Client (Client ID: 1029791844039-3qk7mh166006ulo3e3f0qoq570jdj6fi.apps.googleusercontent.com)
+  try {
+    const oauthResult = await signInWithGoogleOAuth();
+    if (oauthResult && oauthResult.email) {
+      return oauthResult;
+    }
+  } catch (gsiErr) {
+    if (gsiErr.message?.includes('closed') || gsiErr.message?.includes('cancel') || gsiErr.message?.includes('denied')) {
+      throw new Error('Google Sign-In popup was closed');
+    }
+    console.warn('[Google OAuth] Direct client notice, attempting Firebase fallback:', gsiErr.message);
+  }
+
+  // 2. Fallback to Firebase Google popup provider
   try {
     const result = await signInWithPopup(auth, googleProvider);
     const idToken = await result.user.getIdToken();

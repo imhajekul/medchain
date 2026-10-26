@@ -6,8 +6,7 @@ let mongoDbInstance = null;
 let pool = null;
 
 const mongoUri = process.env.MONGODB_URI || 
-  (process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('mongodb://') || process.env.DATABASE_URL.startsWith('mongodb+srv://')) ? process.env.DATABASE_URL : null) ||
-  ATLAS_CLUSTER_URI;
+  (process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('mongodb://') || process.env.DATABASE_URL.startsWith('mongodb+srv://')) ? process.env.DATABASE_URL : null);
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────

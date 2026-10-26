@@ -7,6 +7,7 @@ import {
   issueSessionToken
 } from '../middleware/auth.js';
 import { verifyFirebaseIdToken } from '../services/firebase.service.js';
+import { verifyGoogleIdToken, verifyGoogleAccessToken } from '../services/google.service.js';
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
@@ -79,13 +80,24 @@ export async function registerUser(req, res) {
 
     const sessionToken = issueSessionToken(userPayload);
 
+    res.cookie('medvault_token', sessionToken, {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
     return res.status(201).json({
       sessionToken,
+      token: sessionToken,
       user: userPayload,
       message: 'Account registered successfully.'
     });
   } catch (error) {
     console.error('[Registration Error]:', error.message);
+    if (error.code === 11000 || error.message?.includes('E11000') || error.message?.includes('duplicate key')) {
+      return res.status(409).json({ error: 'An account with this email address already exists.' });
+    }
     return res.status(500).json({ error: 'Internal server error during registration.' });
   }
 }
@@ -130,8 +142,16 @@ export async function loginUser(req, res) {
 
     const sessionToken = issueSessionToken(userPayload);
 
+    res.cookie('medvault_token', sessionToken, {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
     return res.status(200).json({
       sessionToken,
+      token: sessionToken,
       user: userPayload,
       role: user.role,
       walletAddress: user.wallet_address,
@@ -227,22 +247,43 @@ export function getMe(req, res) {
  */
 export async function googleAuth(req, res) {
   try {
-    let { email, name, role, idToken } = req.body;
+    let { email, name, role, idToken, accessToken } = req.body;
 
-    // Verify Firebase ID Token if provided by client
-    if (idToken) {
+    // 1. Verify Google OAuth2 access token if provided
+    if (accessToken) {
       try {
-        const decoded = await verifyFirebaseIdToken(idToken);
-        if (decoded?.email) {
-          email = decoded.email;
+        const verifiedGoogle = await verifyGoogleAccessToken(accessToken);
+        if (verifiedGoogle?.email) {
+          email = verifiedGoogle.email;
         }
-        if (decoded?.name && !name) {
-          name = decoded.name;
+        if (verifiedGoogle?.name && !name) {
+          name = verifiedGoogle.name;
         }
       } catch (tokenErr) {
-        console.warn('[Firebase Verification Notice]:', tokenErr.message);
-        if (process.env.NODE_ENV === 'production' && !email) {
-          return res.status(401).json({ error: 'Invalid or expired Firebase authentication token.' });
+        console.warn('[Google OAuth Access Token Notice]:', tokenErr.message);
+      }
+    }
+
+    // 2. Verify Google ID Token / Firebase ID Token if provided
+    if (idToken && !accessToken) {
+      try {
+        const verifiedId = await verifyGoogleIdToken(idToken);
+        if (verifiedId?.email) {
+          email = verifiedId.email;
+        }
+        if (verifiedId?.name && !name) {
+          name = verifiedId.name;
+        }
+      } catch (googleErr) {
+        try {
+          const decoded = await verifyFirebaseIdToken(idToken);
+          if (decoded?.email) email = decoded.email;
+          if (decoded?.name && !name) name = decoded.name;
+        } catch (firebaseErr) {
+          console.warn('[Google/Firebase Token Notice]:', googleErr.message, firebaseErr.message);
+          if (process.env.NODE_ENV === 'production' && !email) {
+            return res.status(401).json({ error: 'Invalid or expired Google authentication token.' });
+          }
         }
       }
     }

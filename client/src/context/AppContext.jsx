@@ -132,6 +132,7 @@ export function AppProvider({ children }) {
       name: googleData.name,
       photoURL: googleData.photoURL,
       idToken: googleData.idToken,
+      accessToken: googleData.accessToken,
       uid: googleData.googleId,
       role: targetRole
     }, targetRole);

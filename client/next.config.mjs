@@ -27,6 +27,7 @@ const nextConfig = {
         'import.meta.env.VITE_RPC_URL': JSON.stringify(process.env.NEXT_PUBLIC_RPC_URL || process.env.VITE_RPC_URL || 'https://rpc-amoy.polygon.technology/'),
         'import.meta.env.VITE_CONTRACT_ADDRESS': JSON.stringify(process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || process.env.VITE_CONTRACT_ADDRESS || '0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6'),
         'import.meta.env.VITE_RAZORPAY_KEY_ID': JSON.stringify(process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || ''),
+        'import.meta.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '1029791844039-3qk7mh166006ulo3e3f0qoq570jdj6fi.apps.googleusercontent.com'),
       })
     );
 
@@ -36,15 +37,15 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/api/:path*` : 'http://localhost:5000/api/:path*',
+        destination: process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/api/:path*` : 'http://localhost:3001/api/:path*',
       },
       {
         source: '/auth/:path*',
-        destination: process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/auth/:path*` : 'http://localhost:5000/auth/:path*',
+        destination: process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/auth/:path*` : 'http://localhost:3001/auth/:path*',
       },
       {
         source: '/health',
-        destination: process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/health` : 'http://localhost:5000/health',
+        destination: process.env.BACKEND_URL ? `${process.env.BACKEND_URL}/health` : 'http://localhost:3001/health',
       },
     ];
   },

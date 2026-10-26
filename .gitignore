@@ -29,5 +29,6 @@ npm-debug.log*
 # Local encrypted storage blobs & SQLite
 server/storage_blobs/*
 !server/storage_blobs/.gitkeep
+storage_blobs/
 *.sqlite
 *.sqlite-journal
