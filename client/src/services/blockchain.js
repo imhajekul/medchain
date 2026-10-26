@@ -5,7 +5,7 @@ export const CHAIN_CONFIG = {
   chainId: Number(import.meta.env.VITE_CHAIN_ID || 80002),
   chainIdHex: `0x${Number(import.meta.env.VITE_CHAIN_ID || 80002).toString(16)}`,
   chainName: import.meta.env.VITE_CHAIN_NAME || 'Polygon Amoy',
-  rpcUrl: import.meta.env.VITE_RPC_URL || 'https://rpc-amoy.polygon.technology/',
+  rpcUrl: import.meta.env.VITE_RPC_URL || 'https://polygon-amoy-bor-rpc.publicnode.com',
   blockExplorer: 'https://amoy.polygonscan.com/',
   contractAddress: import.meta.env.VITE_CONTRACT_ADDRESS || '0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6',
   nativeCurrency: {

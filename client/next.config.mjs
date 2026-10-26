@@ -24,7 +24,7 @@ const nextConfig = {
         'import.meta.env.VITE_FIREBASE_APP_ID': JSON.stringify(process.env.NEXT_PUBLIC_FIREBASE_APP_ID || process.env.VITE_FIREBASE_APP_ID || ''),
         'import.meta.env.VITE_CHAIN_ID': JSON.stringify(process.env.NEXT_PUBLIC_CHAIN_ID || process.env.VITE_CHAIN_ID || '80002'),
         'import.meta.env.VITE_CHAIN_NAME': JSON.stringify(process.env.NEXT_PUBLIC_CHAIN_NAME || process.env.VITE_CHAIN_NAME || 'Polygon Amoy'),
-        'import.meta.env.VITE_RPC_URL': JSON.stringify(process.env.NEXT_PUBLIC_RPC_URL || process.env.VITE_RPC_URL || 'https://rpc-amoy.polygon.technology/'),
+        'import.meta.env.VITE_RPC_URL': JSON.stringify(process.env.NEXT_PUBLIC_RPC_URL || process.env.VITE_RPC_URL || 'https://polygon-amoy-bor-rpc.publicnode.com'),
         'import.meta.env.VITE_CONTRACT_ADDRESS': JSON.stringify(process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || process.env.VITE_CONTRACT_ADDRESS || '0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6'),
         'import.meta.env.VITE_RAZORPAY_KEY_ID': JSON.stringify(process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || ''),
         'import.meta.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '1029791844039-3qk7mh166006ulo3e3f0qoq570jdj6fi.apps.googleusercontent.com'),

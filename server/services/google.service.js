@@ -18,7 +18,11 @@ export async function verifyGoogleIdToken(idToken) {
     const data = await res.json();
 
     if (GOOGLE_CLIENT_ID && data.aud && data.aud !== GOOGLE_CLIENT_ID) {
-      console.warn(`[Google Auth Warning] Token audience mismatch (received ${data.aud})`);
+      throw new Error(`Google ID token audience mismatch: expected ${GOOGLE_CLIENT_ID}, received ${data.aud}`);
+    }
+
+    if (data.email_verified === false || data.email_verified === 'false') {
+      throw new Error('Google account email has not been verified');
     }
 
     return {
@@ -26,7 +30,7 @@ export async function verifyGoogleIdToken(idToken) {
       name: data.name || data.given_name || (data.email ? data.email.split('@')[0] : 'Google User'),
       photoURL: data.picture || null,
       googleId: data.sub,
-      verified: data.email_verified === 'true' || data.email_verified === true
+      verified: true
     };
   } catch (error) {
     throw new Error(`Google ID token verification failed: ${error.message}`);

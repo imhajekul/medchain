@@ -70,6 +70,19 @@ export async function registerUser(req, res) {
       [userId, normalizedEmail, hash, salt, assignedRole, sovereignWallet, displayName]
     );
 
+    let walletDoc = null;
+    try {
+      walletDoc = await db.provisionWalletDocument({
+        userId,
+        walletAddress: sovereignWallet,
+        email: normalizedEmail,
+        role: assignedRole,
+        name: displayName
+      });
+    } catch (wErr) {
+      console.warn('[Wallet Provision Warning]:', wErr.message);
+    }
+
     const userPayload = {
       id: userId,
       email: normalizedEmail,
@@ -91,6 +104,7 @@ export async function registerUser(req, res) {
       sessionToken,
       token: sessionToken,
       user: userPayload,
+      wallet: walletDoc,
       message: 'Account registered successfully.'
     });
   } catch (error) {
@@ -247,10 +261,35 @@ export function getMe(req, res) {
  */
 export async function googleAuth(req, res) {
   try {
-    let { email, name, role, idToken, accessToken } = req.body;
+    let { email, name, role, idToken, accessToken, credential, id_token, walletAddress } = req.body;
+    idToken = idToken || credential || id_token;
 
-    // 1. Verify Google OAuth2 access token if provided
-    if (accessToken) {
+    // 1. Verify Google ID token (preferred & cryptographically verified with Google Client ID)
+    if (idToken) {
+      try {
+        const verifiedId = await verifyGoogleIdToken(idToken);
+        if (verifiedId?.email) {
+          email = verifiedId.email;
+        }
+        if (verifiedId?.name && !name) {
+          name = verifiedId.name;
+        }
+      } catch (googleErr) {
+        // Fallback: Check if it's a valid Firebase ID token
+        try {
+          const decoded = await verifyFirebaseIdToken(idToken);
+          if (decoded?.email) email = decoded.email;
+          if (decoded?.name && !name) name = decoded.name;
+        } catch (firebaseErr) {
+          console.warn('[Google/Firebase Token Notice]:', googleErr.message, firebaseErr.message);
+          return res.status(401).json({
+            error: 'Invalid or expired Google authentication token.',
+            details: googleErr.message
+          });
+        }
+      }
+    } else if (accessToken) {
+      // 2. Verify Google OAuth2 access token if provided
       try {
         const verifiedGoogle = await verifyGoogleAccessToken(accessToken);
         if (verifiedGoogle?.email) {
@@ -261,30 +300,10 @@ export async function googleAuth(req, res) {
         }
       } catch (tokenErr) {
         console.warn('[Google OAuth Access Token Notice]:', tokenErr.message);
-      }
-    }
-
-    // 2. Verify Google ID Token / Firebase ID Token if provided
-    if (idToken && !accessToken) {
-      try {
-        const verifiedId = await verifyGoogleIdToken(idToken);
-        if (verifiedId?.email) {
-          email = verifiedId.email;
-        }
-        if (verifiedId?.name && !name) {
-          name = verifiedId.name;
-        }
-      } catch (googleErr) {
-        try {
-          const decoded = await verifyFirebaseIdToken(idToken);
-          if (decoded?.email) email = decoded.email;
-          if (decoded?.name && !name) name = decoded.name;
-        } catch (firebaseErr) {
-          console.warn('[Google/Firebase Token Notice]:', googleErr.message, firebaseErr.message);
-          if (process.env.NODE_ENV === 'production' && !email) {
-            return res.status(401).json({ error: 'Invalid or expired Google authentication token.' });
-          }
-        }
+        return res.status(401).json({
+          error: 'Invalid Google OAuth access token.',
+          details: tokenErr.message
+        });
       }
     }
 
@@ -303,7 +322,9 @@ export async function googleAuth(req, res) {
       user = result.rows[0];
     } else {
       // 2. Auto-register Google user
-      const sovereignWallet = ethers.Wallet.createRandom().address.toLowerCase();
+      const sovereignWallet = (walletAddress && ethers.isAddress(walletAddress))
+        ? walletAddress.toLowerCase()
+        : ethers.Wallet.createRandom().address.toLowerCase();
       const userId = `usr_g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const displayName = name ? String(name).trim() : (assignedRole === 'DOCTOR' ? 'Dr. Google User' : 'Google Patient');
       const dummySalt = crypto.randomBytes(16).toString('hex');
@@ -322,6 +343,20 @@ export async function googleAuth(req, res) {
         role: assignedRole,
         name: displayName
       };
+    }
+
+    // 3. Provision or ensure MongoDB wallet document exists
+    let walletDoc = null;
+    try {
+      walletDoc = await db.provisionWalletDocument({
+        userId: user.id,
+        walletAddress: user.wallet_address,
+        email: user.email,
+        role: user.role,
+        name: user.name
+      });
+    } catch (walletErr) {
+      console.warn('[MongoDB Wallet Provision Notice]:', walletErr.message);
     }
 
     const userPayload = {
@@ -347,6 +382,7 @@ export async function googleAuth(req, res) {
       user: userPayload,
       role: user.role,
       walletAddress: user.wallet_address,
+      wallet: walletDoc,
       message: 'Google authentication successful.'
     });
   } catch (error) {

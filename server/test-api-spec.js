@@ -1,5 +1,8 @@
 import { ethers } from 'ethers';
 import crypto from 'crypto';
+import dotenv from 'dotenv';
+dotenv.config();
+import { db } from './db.js';
 
 const BASE_URL = 'http://localhost:3001';
 
@@ -228,6 +231,34 @@ async function runApiSpecTests() {
   // ===========================================================================
   console.log('➡️ [Step 5] Testing Time-Boxed Grants & Access Verification Flow...');
 
+  // Top up patient balance via webhook for micropayment grant fee
+  const secretKey = process.env.RAZORPAY_WEBHOOK_SECRET || 'MedVaultWebhookSecret2026!';
+  const grantTopupPayload = JSON.stringify({
+    event: 'payment.captured',
+    payload: {
+      payment: {
+        entity: {
+          id: `pay_test_${Date.now()}`,
+          order_id: `order_test_${Date.now()}`,
+          amount: 5000,
+          notes: {
+            walletAddress: patient.address,
+            tokenCredit: 5.0
+          }
+        }
+      }
+    }
+  });
+  const grantTopupSig = crypto.createHmac('sha256', secretKey).update(Buffer.from(grantTopupPayload)).digest('hex');
+  await fetch(`${BASE_URL}/api/payment/webhook`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-razorpay-signature': grantTopupSig
+    },
+    body: grantTopupPayload
+  });
+
   const doctorKeyMaterial = Buffer.from('AES_DEK_ASLYMMETRICALLY_WRAPPED_FOR_DOCTOR').toString('base64');
   const grantRes = await fetch(`${BASE_URL}/grants`, {
     method: 'POST',
@@ -370,7 +401,7 @@ async function runApiSpecTests() {
   };
 
   const webhookBodyStr = JSON.stringify(webhookPayload);
-  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || '';
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || 'MedVaultWebhookSecret2026!';
   const validSignature = webhookSecret
     ? crypto.createHmac('sha256', webhookSecret).update(Buffer.from(webhookBodyStr)).digest('hex')
     : 'mock_valid_sig';

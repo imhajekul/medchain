@@ -11,7 +11,7 @@ metadata:
 data:
   NODE_ENV: "production"
   PORT: "3001"
-  RPC_URL: "https://rpc-amoy.polygon.technology/"
+  RPC_URL: "https://polygon-amoy-bor-rpc.publicnode.com"
   CONTRACT_ADDRESS: "0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6"
   CORS_ORIGIN: "https://medvault.app"
   RATE_LIMIT_MAX: "1000"

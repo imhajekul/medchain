@@ -38,7 +38,7 @@ services:
       DATABASE_URL: mongodb://${MONGO_INITDB_ROOT_USERNAME:-medvault}:${MONGO_INITDB_ROOT_PASSWORD:-medvault_secure_password_2026}@mongodb:27017/medvault?authSource=admin
       MONGODB_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME:-medvault}:${MONGO_INITDB_ROOT_PASSWORD:-medvault_secure_password_2026}@mongodb:27017/medvault?authSource=admin
       JWT_SECRET: ${JWT_SECRET:-bf3566236c23ee0fb9bbd88ac08f1ab8ff585c1d0b87b135d6f93b70c16222e8}
-      RPC_URL: ${RPC_URL:-https://rpc-amoy.polygon.technology/}
+      RPC_URL: ${RPC_URL:-https://polygon-amoy-bor-rpc.publicnode.com}
       CONTRACT_ADDRESS: ${CONTRACT_ADDRESS:-0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6}
       RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY:-}
       PINATA_API_KEY: ${PINATA_API_KEY:-}

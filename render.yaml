@@ -24,9 +24,11 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: RPC_URL
-        value: https://rpc-amoy.polygon.technology/
+        value: https://polygon-amoy-bor-rpc.publicnode.com
       - key: CONTRACT_ADDRESS
         value: 0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6
+      - key: GOOGLE_CLIENT_ID
+        value: 1029791844039-3qk7mh166006ulo3e3f0qoq570jdj6fi.apps.googleusercontent.com
       - key: RELAYER_PRIVATE_KEY
         sync: false
       - key: CORS_ORIGIN
@@ -54,5 +56,9 @@ services:
           property: host
       - key: VITE_CHAIN_ID
         value: "80002"
+      - key: VITE_RPC_URL
+        value: https://polygon-amoy-bor-rpc.publicnode.com
       - key: VITE_CONTRACT_ADDRESS
         value: "0x38b8AcE4624DEb11568A57866e4a28Ece055D0f6"
+      - key: VITE_GOOGLE_CLIENT_ID
+        value: 1029791844039-3qk7mh166006ulo3e3f0qoq570jdj6fi.apps.googleusercontent.com

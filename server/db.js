@@ -24,6 +24,7 @@ class MongoDatabase {
     this.indexer_state = db.collection('indexer_state');
     this.payments = db.collection('payments');
     this.wallet_transactions = db.collection('wallet_transactions');
+    this.wallets = db.collection('wallets');
     this.initIndexes();
   }
 
@@ -31,6 +32,8 @@ class MongoDatabase {
     try {
       await this.users.createIndex({ email: 1 }, { unique: true, background: true });
       await this.users.createIndex({ wallet_address: 1 }, { background: true });
+      await this.wallets.createIndex({ wallet_address: 1 }, { unique: true, background: true });
+      await this.wallets.createIndex({ user_id: 1 }, { background: true });
       await this.records.createIndex({ record_id_hex: 1 }, { unique: true, background: true });
       await this.records.createIndex({ owner_address: 1 }, { background: true });
       await this.access_grants.createIndex({ grant_id_hex: 1 }, { unique: true, background: true });
@@ -566,6 +569,29 @@ class MongoDatabase {
     return await this.payments.findOne({ payment_id: paymentId });
   }
 
+  async provisionWalletDocument({ userId, walletAddress, email, role, name }) {
+    const wallet = String(walletAddress || '').toLowerCase();
+    const existing = await this.wallets.findOne({ wallet_address: wallet });
+    if (!existing) {
+      const doc = {
+        id: `wlt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        user_id: userId,
+        wallet_address: wallet,
+        email: email ? String(email).toLowerCase() : null,
+        role: (role || 'PATIENT').toUpperCase(),
+        name: name || '',
+        balance: 0.0,
+        currency: 'POL',
+        network: 'polygon-amoy',
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+      await this.wallets.insertOne(doc);
+      return doc;
+    }
+    return existing;
+  }
+
   async inspect() {
     const [users, records, grants, auditLogs, payments, walletTxs] = await Promise.all([
       this.users.find({}, { projection: { password_hash: 0, salt: 0 } }).sort({ created_at: -1 }).limit(50).toArray(),
@@ -608,6 +634,7 @@ class MemoryDatabase {
     this.audit_logs = [];
     this.payments = [];
     this.wallet_transactions = [];
+    this.wallets = [];
     this.indexer_state = new Map([
       ['polygon-amoy', { last_indexed_block: 14221045, updated_at: new Date() }]
     ]);
@@ -1091,6 +1118,28 @@ class MemoryDatabase {
     return this.payments.find(pay => pay.payment_id === paymentId) || null;
   }
 
+  async provisionWalletDocument({ userId, walletAddress, email, role, name }) {
+    const wallet = String(walletAddress || '').toLowerCase();
+    let existing = this.wallets.find(w => w.wallet_address === wallet);
+    if (!existing) {
+      existing = {
+        id: `wlt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        user_id: userId,
+        wallet_address: wallet,
+        email: email ? String(email).toLowerCase() : null,
+        role: (role || 'PATIENT').toUpperCase(),
+        name: name || '',
+        balance: 0.0,
+        currency: 'POL',
+        network: 'polygon-amoy',
+        created_at: new Date(),
+        updated_at: new Date()
+      };
+      this.wallets.push(existing);
+    }
+    return existing;
+  }
+
   async inspect() {
     return {
       activeDriver: 'in-memory-fallback',
@@ -1209,6 +1258,11 @@ export const db = {
   getUserWallet: async (walletAddress) => {
     if (mongoDb) return await mongoDb.getUserWallet(walletAddress);
     return await memoryDb.getUserWallet(walletAddress);
+  },
+
+  provisionWalletDocument: async (walletData) => {
+    if (mongoDb) return await mongoDb.provisionWalletDocument(walletData);
+    return await memoryDb.provisionWalletDocument(walletData);
   },
 
   creditWalletBalance: async (walletAddress, amount, details) => {

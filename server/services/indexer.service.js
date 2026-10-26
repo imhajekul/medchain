@@ -10,8 +10,20 @@ const MEDVAULT_ACCESS_ABI = [
 
 export class BlockchainIndexer {
   constructor() {
-    this.rpcUrl = process.env.RPC_URL;
-    this.contractAddress = process.env.CONTRACT_ADDRESS;
+    let rpc = process.env.RPC_URL;
+    if (!rpc || rpc.includes('rpc-amoy.polygon.technology')) {
+      rpc = 'https://polygon-amoy-bor-rpc.publicnode.com';
+    }
+    this.rpcUrl = rpc;
+    let addr = process.env.CONTRACT_ADDRESS;
+    if (addr) {
+      try {
+        addr = ethers.getAddress(addr.toLowerCase());
+      } catch (e) {
+        console.warn('[Indexer Address Notice]:', e.message);
+      }
+    }
+    this.contractAddress = addr;
     this.isRunning = false;
     this.confirmations = 3;
     this.provider = null;
